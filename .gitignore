@@ -23,3 +23,7 @@ env/
 # İşletim sistemi
 .DS_Store
 Thumbs.db
+
+# Handoff ve TODO — repoya girmez
+kontainy_Handoff.md
+KONTAINY_TODO.md

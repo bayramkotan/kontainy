@@ -74,7 +74,9 @@ python -m venv .venv
 GUI açmadan teşhis:
 
 ```bash
-.venv/bin/python main.py --scan
+.venv/bin/python main.py --scan     # motorlar ve context zinciri
+.venv/bin/python main.py --doctor   # teşhis kuralları
+.venv/bin/python main.py --stats    # katalog/kural/Learn sayımları
 ```
 
 ---
@@ -83,17 +85,31 @@ GUI açmadan teşhis:
 
 ```text
 kontainy/
-├── main.py                    # Giriş noktası (--scan bayrağı ile CLI teşhis)
-├── core/
-│   ├── constants.py           # Sürüm ve uygulama sabitleri
-│   ├── settings_catalog.py    # AYAR KATALOĞU — projenin kalbi
-│   ├── api.py                 # UNIX soketi üzerinden Docker API istemcisi
-│   └── discovery.py           # Motor keşfi + terminal hedefi çözümlemesi
-├── ui/
-│   └── dashboard.py           # PySide6 ana pencere (4 sekme)
-├── pyproject.toml
-├── requirements.txt
-└── README.md
+├── main.py                      # Giriş noktası: --scan · --doctor · --stats
+└── src/
+    ├── core/
+    │   ├── constants.py         # Sürüm ve uygulama sabitleri
+    │   ├── api.py               # UNIX soketi üzerinden Docker Engine API
+    │   ├── discovery.py         # Motor keşfi + terminal hedefi zinciri
+    │   └── catalog/             # AYAR KATALOĞU — projenin kalbi
+    │       ├── base.py          #   Setting dataclass'ı, yüzeyler, dosyalar
+    │       ├── docker.py        #   daemon.json + ~/.docker/config.json
+    │       ├── podman.py        #   containers.conf + storage.conf + registries.conf
+    │       ├── run_flags.py     #   container başına çalıştırma bayrakları
+    │       └── quadlet.py       #   systemd birim anahtarları
+    ├── rules/                   # TEŞHİS MOTORU
+    │   ├── engine.py            #   ortam fotoğrafı + Rule/Finding
+    │   └── catalog.py           #   kural seti
+    ├── learn/
+    │   └── content.py           # LEARN İÇERİĞİ — 16 kategori
+    ├── gui/
+    │   ├── main_window.py       # kenar çubuğu + sayfa yığını
+    │   ├── theme.py             # palet ve QSS
+    │   └── pages/               # engines · containers · settings · gotchas
+    │       └── …                #   diagnostics · learn · logs
+    └── utils/
+        ├── config.py            # ayar deposu, günlük, komut geçmişi
+        └── workers.py           # arka plan işleri (çökme dersi burada)
 ```
 
 ### `settings_catalog.py` — projenin kalbi

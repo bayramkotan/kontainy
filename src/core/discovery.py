@@ -39,7 +39,7 @@ class Endpoint:
     """Keşfedilmiş tek bir motor adresi."""
     address: str                   # unix:///... veya tcp://...
     source: str                    # nereden bulundu (insan okunur)
-    family: str                    # "docker" | "podman" | "bilinmiyor"
+    family: str                    # "docker" | "podman" | "unknown"
     name: str = ""                 # context adı varsa
     reachable: bool = False
     info: Optional[EngineInfo] = None
@@ -77,8 +77,8 @@ def _xdg_runtime() -> str:
 
 
 DOCKER_SOCKET_CANDIDATES = [
-    ("/run/docker.sock",                      "yerel daemon"),
-    ("/var/run/docker.sock",                  "yerel daemon (eski yol)"),
+    ("/run/docker.sock",                      "local daemon"),
+    ("/var/run/docker.sock",                  "local daemon (legacy path)"),
     (str(Path.home() / ".docker/desktop/docker.sock"), "Docker Desktop for Linux"),
     (str(Path.home() / ".docker/run/docker.sock"),     "Docker Desktop (yeni yol)"),
     (str(Path.home() / ".rd/docker.sock"),    "Rancher Desktop"),
@@ -88,8 +88,8 @@ DOCKER_SOCKET_CANDIDATES = [
 
 def podman_socket_candidates() -> list:
     return [
-        (f"{_xdg_runtime()}/podman/podman.sock", "Podman rootless (user soketi)"),
-        ("/run/podman/podman.sock",              "Podman rootful (sistem soketi)"),
+        (f"{_xdg_runtime()}/podman/podman.sock", "Podman rootless (user socket)"),
+        ("/run/podman/podman.sock",              "Podman rootful (system socket)"),
     ]
 
 
@@ -170,12 +170,12 @@ def resolve_cli_target() -> CliTarget:
     contexts = dict(docker_contexts())
 
     layers = [
-        ("DOCKER_HOST (ortam değişkeni)", docker_host, bool(docker_host)),
-        ("DOCKER_CONTEXT (ortam değişkeni)", docker_context,
+        ("DOCKER_HOST (environment)", docker_host, bool(docker_host)),
+        ("DOCKER_CONTEXT (environment)", docker_context,
          bool(docker_context) and not docker_host),
         ("config.json → currentContext", current_context,
          bool(current_context) and not docker_host and not docker_context),
-        ("yerleşik varsayılan", "unix:///var/run/docker.sock",
+        ("built-in default", "unix:///var/run/docker.sock",
          not docker_host and not docker_context and not current_context),
     ]
 
@@ -186,7 +186,7 @@ def resolve_cli_target() -> CliTarget:
             if name.startswith("DOCKER_HOST"):
                 winner = value
             elif "CONTEXT" in name.upper() or "currentContext" in name:
-                winner = contexts.get(value, f"(context bulunamadı: {value})")
+                winner = contexts.get(value, f"(context not found: {value})")
             else:
                 winner = value
 
@@ -205,22 +205,22 @@ def docker_shim_warning() -> Optional[str]:
     except OSError:
         return None
     if "podman" in real:
-        return (f"`docker` komutu aslında Podman'a gidiyor "
-                f"({docker} → {real}). podman-docker paketi kurulu.")
+        return (f"The `docker` command actually goes to Podman "
+                f"({docker} \u2192 {real}). The podman-docker package is installed.")
     return None
 
 
 def systemd_unit_state(unit: str, user: bool = True) -> str:
-    """Bir systemd biriminin durumu ('active', 'inactive', 'bulunamadı')."""
+    """State of a systemd unit: 'active', 'inactive' or 'not found'."""
     cmd = ["systemctl"]
     if user:
         cmd.append("--user")
     cmd += ["is-active", unit]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        return (result.stdout or result.stderr).strip() or "bilinmiyor"
+        return (result.stdout or result.stderr).strip() or "unknown"
     except (OSError, subprocess.TimeoutExpired):
-        return "bulunamadı"
+        return "not found"
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ def discover(probe: bool = True) -> list:
     # 1) Ortam değişkeni
     env_host = os.environ.get("DOCKER_HOST")
     if env_host:
-        add(env_host, "DOCKER_HOST ortam değişkeni", "bilinmiyor")
+        add(env_host, "DOCKER_HOST environment variable", "unknown")
 
     # 2) Docker context'leri (Desktop dahil)
     for name, host in docker_contexts():

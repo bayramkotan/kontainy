@@ -1,0 +1,418 @@
+name: Build & Release kontainy
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Ported from VenvStudio. The suite is a JOB rather than its own workflow so
+  # a release with failing tests is impossible rather than merely embarrassing;
+  # every build below waits on it.
+  #
+  # Seconds, not minutes: PySide6 is NOT installed on purpose. tests/conftest.py
+  # stubs it, and the suite covers decisions — catalogue integrity, command
+  # construction, config writing, the context chain — which is where every bug
+  # found so far actually lived.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported version and the one Bayram develops on.
+        # pyproject declares requires-python >= 3.10.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+      - name: Run tests
+        run: python -m pytest -q
+
+  build-windows:
+    needs: [tests]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 pyinstaller Pillow
+      - name: Build
+        id: build1
+        run: python build.py
+        continue-on-error: true
+      - name: Retry without windowed
+        if: steps.build1.outcome == 'failure'
+        run: python build.py --debug
+      - uses: actions/upload-artifact@v5
+        with:
+          name: kontainy-Windows
+          path: dist/kontainy.exe
+          if-no-files-found: warn
+
+  build-macos-arm:
+    needs: [tests]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 pyinstaller Pillow
+      - name: Build (ARM64)
+        run: python build.py
+      - uses: actions/upload-artifact@v5
+        with:
+          name: kontainy-macOS-arm64
+          path: dist/kontainy
+          if-no-files-found: warn
+
+  build-linux-appimage:
+    needs: [tests]
+    runs-on: ubuntu-22.04
+    # VenvStudio burned a full six-hour default on a hung apt-get (run #285).
+    # A tight cap turns a stuck build into a fast, obvious failure.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install system deps
+        env:
+          # apt on the 22.04 runner otherwise stops on two interactive prompts
+          # that -y does not cover, with no TTY to answer them: debconf config
+          # screens and needrestart's "which services should be restarted?".
+          # libfuse2 touches running services and triggers the latter — this is
+          # exactly what wedged VenvStudio's run #285 for six hours.
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+          NEEDRESTART_SUSPEND: '1'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            -o Dpkg::Options::=--force-confdef \
+            -o Dpkg::Options::=--force-confold \
+            libxcb-cursor0 libxcb-xinerama0 libegl1 \
+            libxcb-icccm4 libxkbcommon-x11-0 libxcb-keysyms1 libxcb-image0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-randr0 \
+            libxcb-sync1 libxcb-shm0 fuse libfuse2 fonts-noto-color-emoji
+
+      - name: Install Python deps
+        run: pip install PySide6 pyinstaller Pillow
+
+      - name: Build with PyInstaller (onedir for AppImage)
+        run: python build.py --onedir
+
+      - name: Create AppImage
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -r dist/kontainy/* AppDir/usr/bin/
+
+          # ── Drop the bundled font stack so colour emoji render ──
+          # Inherited from VenvStudio, and it matters more here: kontainy uses
+          # emoji as sidebar, category and severity icons throughout. PyInstaller
+          # bundles libfreetype (loads COLR/CBDT colour tables), libharfbuzz
+          # (shapes the run) and libpng16 (decodes the embedded colour PNGs).
+          # Mixing bundled and system copies flattens every emoji to grey.
+          # Removing only one of the three is NOT enough — all three must go.
+          find AppDir/usr/bin -name "libfreetype.so*" -delete 2>/dev/null || true
+          find AppDir/usr/bin -name "libharfbuzz.so*" -delete 2>/dev/null || true
+          find AppDir/usr/bin -name "libpng16.so*" -delete 2>/dev/null || true
+
+          # ── Bundle Noto Color Emoji ──
+          # On hosts without an emoji font the icons render as grey boxes.
+          mkdir -p AppDir/usr/share/fonts/truetype/noto
+          for _src in \
+            /usr/share/fonts/truetype/noto/NotoColorEmoji.ttf \
+            /usr/share/fonts/noto/NotoColorEmoji.ttf \
+            /usr/share/fonts/google-noto/NotoColorEmoji.ttf; do
+            if [ -f "$_src" ]; then
+              cp "$_src" AppDir/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf
+              echo "Bundled emoji font from $_src"
+              break
+            fi
+          done
+
+          # ── Minimal fontconfig ──
+          # A standalone config lacks the generic family mappings, so
+          # "sans-serif" resolves to the alphabetically first font and the whole
+          # UI renders monospace. Sourcing the host config restores them;
+          # ignore_missing keeps us safe where there is none.
+          mkdir -p AppDir/usr/bin/_internal/etc/fonts
+          cat > AppDir/usr/bin/_internal/etc/fonts/fonts.conf << 'FONTSCONF'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+            <dir>~/.local/share/fonts</dir>
+            <alias binding="strong">
+              <family>sans-serif</family>
+              <prefer>
+                <family>Cantarell</family>
+                <family>Inter</family>
+                <family>Noto Sans</family>
+                <family>DejaVu Sans</family>
+              </prefer>
+            </alias>
+            <match target="font">
+              <edit name="antialias" mode="assign"><bool>true</bool></edit>
+              <edit name="hinting" mode="assign"><bool>true</bool></edit>
+              <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
+              <edit name="rgba" mode="assign"><const>rgb</const></edit>
+              <edit name="lcdfilter" mode="assign"><const>lcddefault</const></edit>
+            </match>
+          </fontconfig>
+          FONTSCONF
+          sed -i 's/^          //' AppDir/usr/bin/_internal/etc/fonts/fonts.conf
+
+          cat > AppDir/usr/share/applications/kontainy.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Name=kontainy
+          Comment=Every Docker and Podman setting, in one interface
+          Exec=kontainy
+          Icon=kontainy
+          Type=Application
+          Categories=Development;System;
+          Keywords=docker;podman;container;kubernetes;quadlet;
+          DESKTOP
+          sed -i 's/^          //' AppDir/usr/share/applications/kontainy.desktop
+          cp AppDir/usr/share/applications/kontainy.desktop AppDir/kontainy.desktop
+
+          if [ -f assets/icon.png ]; then
+            cp assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/kontainy.png
+            cp assets/icon.png AppDir/kontainy.png
+          else
+            # linuxdeploy refuses to build without an icon; a generated
+            # placeholder is better than a failed release.
+            python - << 'ICON'
+          from PIL import Image, ImageDraw
+          img = Image.new("RGBA", (256, 256), (30, 30, 46, 255))
+          d = ImageDraw.Draw(img)
+          d.rounded_rectangle([40, 70, 216, 200], radius=16,
+                              outline=(137, 180, 250, 255), width=10)
+          d.line([40, 110, 216, 110], fill=(137, 180, 250, 255), width=10)
+          img.save("AppDir/kontainy.png")
+          img.save("AppDir/usr/share/icons/hicolor/256x256/apps/kontainy.png")
+          ICON
+          fi
+
+          # ── apprun hook ──
+          # linuxdeploy sources anything in apprun-hooks/ at launch. Forcing xcb
+          # avoids the Wayland plugin being picked on hosts where it is present
+          # but broken, which shows up as an instant silent exit.
+          mkdir -p AppDir/apprun-hooks
+          cat > AppDir/apprun-hooks/kontainy-env.sh << 'HOOK'
+          #!/bin/bash
+          export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+          export QT_ENABLE_HIGHDPI_SCALING="${QT_ENABLE_HIGHDPI_SCALING:-1}"
+          if [ -n "$APPDIR" ] && [ -f "$APPDIR/usr/bin/_internal/etc/fonts/fonts.conf" ]; then
+            export FONTCONFIG_FILE="$APPDIR/usr/bin/_internal/etc/fonts/fonts.conf"
+          fi
+          HOOK
+          chmod +x AppDir/apprun-hooks/kontainy-env.sh
+
+          export VERSION=${GITHUB_REF_NAME#v}
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --desktop-file AppDir/kontainy.desktop \
+            --icon-file AppDir/kontainy.png \
+            --output appimage || echo "::warning::linuxdeploy failed"
+
+          ls -la *.AppImage || echo "no AppImage produced"
+
+      - name: Smoke-test AppImage (headless)
+        continue-on-error: true
+        run: |
+          set +e
+          APP=$(ls kontainy*.AppImage 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then echo "no AppImage to test"; exit 0; fi
+          chmod +x "$APP"
+          # --scan needs no display and exercises discovery, the context chain
+          # and the systemd probes — the parts most likely to break in a bundle.
+          QT_QPA_PLATFORM=offscreen timeout 60 "$APP" --stats > /tmp/stats.log 2>&1
+          echo "--- stats ---"; cat /tmp/stats.log
+          if grep -q "toplam" /tmp/stats.log; then
+            echo "✅ catalogue loaded inside the AppImage"
+          else
+            echo "::warning::AppImage did not produce catalogue stats"
+          fi
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: kontainy-Linux-AppImage
+          path: kontainy*.AppImage
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: kontainy-Linux
+          path: dist/kontainy/kontainy
+          if-no-files-found: warn
+
+  release:
+    needs: [build-windows, build-macos-arm, build-linux-appimage]
+    runs-on: ubuntu-latest
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.build-linux-appimage.result == 'success'
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get categorized changelog
+        id: changelog
+        run: |
+          set +e
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "${{ github.ref_name }}" | head -n1)
+          set -e
+
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%s" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"%s" ${PREV_TAG}..HEAD)
+          fi
+          COMMITS=$(echo "$COMMITS" | grep -v "^release:" || true)
+
+          FEATURES=$(echo "$COMMITS" | grep -i "^feat:" | sed 's/^feat:\s*//' | sed 's/^/- /' || true)
+          FIXES=$(echo "$COMMITS" | grep -i "^fix:" | sed 's/^fix:\s*//' | sed 's/^/- /' || true)
+          IMPROVEMENTS=$(echo "$COMMITS" | grep -iE "^(chore|refactor|build|ci|perf|style|docs):" | sed 's/^[a-zA-Z]*:\s*//' | sed 's/^/- /' || true)
+          OTHERS=$(echo "$COMMITS" | grep -ivE "^(feat|fix|chore|refactor|build|ci|perf|style|docs|release):" | sed 's/^/- /' || true)
+
+          BODY=""
+          if [ -n "$FEATURES" ] && [ "$FEATURES" != "- " ]; then
+            BODY="${BODY}### ✨ New Features\n${FEATURES}\n\n"
+          fi
+          if [ -n "$FIXES" ] && [ "$FIXES" != "- " ]; then
+            BODY="${BODY}### 🐛 Bug Fixes\n${FIXES}\n\n"
+          fi
+          if [ -n "$IMPROVEMENTS" ] && [ "$IMPROVEMENTS" != "- " ]; then
+            BODY="${BODY}### 🔧 Improvements\n${IMPROVEMENTS}\n\n"
+          fi
+          if [ -n "$OTHERS" ] && [ "$OTHERS" != "- " ]; then
+            BODY="${BODY}### 📌 Other Changes\n${OTHERS}\n\n"
+          fi
+          if [ -z "$BODY" ]; then
+            BODY="- Maintenance release\n"
+          fi
+
+          echo "changes<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v5
+        continue-on-error: true
+
+      - name: Prepare files & sizes
+        id: sizes
+        continue-on-error: true
+        run: |
+          ls -laR
+          mv kontainy-macOS-arm64/kontainy kontainy-macOS-arm64/kontainy-macOS-arm64 2>/dev/null || true
+
+          WIN_SIZE=$(du -sh kontainy-Windows/kontainy.exe 2>/dev/null | cut -f1 || echo "—")
+          MAC_SIZE=$(du -sh kontainy-macOS-arm64/kontainy-macOS-arm64 2>/dev/null | cut -f1 || echo "—")
+          LNX_SIZE=$(du -sh kontainy-Linux-AppImage/kontainy*.AppImage 2>/dev/null | cut -f1 || echo "—")
+
+          echo "win_size=$WIN_SIZE" >> $GITHUB_OUTPUT
+          echo "mac_size=$MAC_SIZE" >> $GITHUB_OUTPUT
+          echo "lnx_size=$LNX_SIZE" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            kontainy-Windows/kontainy.exe
+            kontainy-Linux-AppImage/kontainy*.AppImage
+            kontainy-macOS-arm64/kontainy-macOS-arm64
+          body: |
+            <div align="center">
+
+            # 📦 kontainy ${{ github.ref_name }}
+
+            **Every Docker and Podman setting, in one interface**
+
+            [![PyPI](https://img.shields.io/badge/PyPI-${{ github.ref_name }}-a6e3a1?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/kontainy/)
+            [![License](https://img.shields.io/badge/License-MIT-cba6f7?style=flat-square)](https://github.com/bayramkotan/kontainy/blob/main/LICENSE)
+            [![Python](https://img.shields.io/badge/Python-3.10%2B-89b4fa?style=flat-square&logo=python&logoColor=white)](https://python.org)
+
+            </div>
+
+            ---
+
+            ## 📋 What's Changed
+
+            ${{ steps.changelog.outputs.changes }}
+
+            ---
+
+            ## 📥 Downloads
+
+            | Platform | File | Size | Notes |
+            |:--------:|:-----|:----:|:------|
+            | 🐧 **Linux** x64 | `kontainy-x86_64.AppImage` | ${{ steps.sizes.outputs.lnx_size }} | `chmod +x` then run — the fully supported target |
+            | 🪟 **Windows** x64 | `kontainy.exe` | ${{ steps.sizes.outputs.win_size }} | Docker Desktop and `podman machine` only; rootless, Quadlet and systemd checks do not apply |
+            | 🍎 **macOS** ARM64 | `kontainy-macOS-arm64` | ${{ steps.sizes.outputs.mac_size }} | Same caveats as Windows |
+            | 📦 **PyPI** | `pip install kontainy` | — | `pip install --upgrade kontainy` |
+
+            ---
+
+            <div align="center">
+
+            ⭐ **If kontainy helps you, consider [giving it a star](https://github.com/bayramkotan/kontainy)!** ⭐
+
+            [📖 Documentation](https://github.com/bayramkotan/kontainy#readme) · [🐛 Report Bug](https://github.com/bayramkotan/kontainy/issues) · [💡 Request Feature](https://github.com/bayramkotan/kontainy/issues)
+
+            </div>
+          fail_on_unmatched_files: false
+
+  publish-pypi:
+    needs: [tests]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        run: |
+          # build.py is the PyInstaller driver, not a setuptools build script.
+          # Leaving it in place makes `python -m build` try to use it.
+          mv build.py _pyinstaller_build.py.bak
+          python -m build
+          mv _pyinstaller_build.py.bak build.py
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

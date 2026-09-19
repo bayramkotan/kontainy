@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontainy"
-version = "0.1.0"
+version = "0.0.1"
 description = "Docker ve Podman'ın her ayarı, tek arayüzde — Linux masaüstü konteyner yönetim aracı"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,5 +32,8 @@ kontainy = "main:main"
 kty = "main:main"
 
 [tool.setuptools]
-packages = ["core", "ui"]
+packages = [
+    "src", "src.core", "src.core.catalog", "src.gui", "src.gui.pages",
+    "src.rules", "src.learn", "src.utils",
+]
 py-modules = ["main"]
