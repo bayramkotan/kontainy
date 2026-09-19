@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Sanal ortamlar
+.venv/
+venv/
+env/
+
+# Araçlar
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Editör
+.vscode/
+.idea/
+*.swp
+
+# İşletim sistemi
+.DS_Store
+Thumbs.db
