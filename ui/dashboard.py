@@ -77,27 +77,46 @@ class ContainerWorker(QObject):
         self.done.emit(rows)
 
 
-def run_in_thread(parent, worker: QObject, slot):
-    """Bir worker'ı canlı tutarak arka planda çalıştırır.
+# Çalışan (thread, worker) çiftleri burada tutulur.
+#
+# Bu liste SÜS DEĞİL: referans tutulmazsa run_in_thread döner dönmez Python
+# worker'ı (ve QThread'i) çöpe atar, C++ tarafı çalışan iş parçacığının
+# altından silinir ve uygulama "QThread: Destroyed while thread is still
+# running / Aborted (core dumped)" ile çöker.
+#
+# Referansı çağıranın kendi üzerinde tutmak yetmez — worker'ın kendisi de
+# saklanmalıdır, çünkü moveToThread sahiplik devretmez.
+_LIVE_JOBS: list = []
 
-    QThread'in referansı saklanmazsa Python nesneyi toplar ve C++ tarafı
-    çalışan bir iş parçacığının altından silinir.
-    """
-    thread = QThread(parent)
+
+def run_in_thread(parent, worker: QObject, slot):
+    """Bir worker'ı arka planda çalıştırır ve bitene kadar canlı tutar."""
+    thread = QThread()
     worker.moveToThread(thread)
+    job = (thread, worker)
+    _LIVE_JOBS.append(job)
+
     thread.started.connect(worker.run)
     worker.done.connect(slot)
     worker.done.connect(thread.quit)
     if hasattr(worker, "failed"):
         worker.failed.connect(thread.quit)
-    thread.finished.connect(worker.deleteLater)
-    if not hasattr(parent, "_threads"):
-        parent._threads = []
-    parent._threads.append(thread)
-    thread.finished.connect(lambda: parent._threads.remove(thread)
-                            if thread in parent._threads else None)
+
+    def _release():
+        if job in _LIVE_JOBS:
+            _LIVE_JOBS.remove(job)
+
+    thread.finished.connect(_release)
     thread.start()
     return thread
+
+
+def stop_all_jobs(wait_ms: int = 3000) -> None:
+    """Kapanışta çalışan tüm iş parçacıklarını düzgünce sonlandırır."""
+    for thread, _worker in list(_LIVE_JOBS):
+        thread.quit()
+        thread.wait(wait_ms)
+    _LIVE_JOBS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -446,10 +465,16 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(tabs)
 
         st = stats()
-        bar = QStatusBar()
+        self.status = QStatusBar()
+        bar = self.status
         bar.showMessage(
             f"Katalog: {st['toplam']} ayar "
             f"(docker {st['docker']} · podman {st['podman']} · ortak {st['ortak']}) "
             f"— {st['kullanici_kapsami']} tanesi root gerektirmez, "
             f"{st['tuzakli']} tanesinde tuzak notu var")
         self.setStatusBar(bar)
+
+    def closeEvent(self, event):
+        """Çalışan iş parçacıkları bitmeden pencere kapanmaz."""
+        stop_all_jobs()
+        super().closeEvent(event)

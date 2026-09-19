@@ -167,17 +167,11 @@ class EngineClient:
             if "podman" in str(v.get("Platform", {}).get("Name", "")).lower():
                 kind = "podman"
 
-        rootless = False
         try:
             info = self._request("GET", "/info") or {}
-            if kind == "podman":
-                rootless = bool(info.get("host", {}).get("security", {})
-                                .get("rootless", False))
-            else:
-                rootless = "rootless" in (info.get("SecurityOptions") or [""])[0].lower() \
-                    if info.get("SecurityOptions") else False
         except EngineError:
             info = {}
+        rootless = self._detect_rootless(kind, info)
 
         return EngineInfo(
             kind=kind,
@@ -188,6 +182,43 @@ class EngineClient:
             rootless=rootless,
             raw={"version": v, "info": info},
         )
+
+    def _detect_rootless(self, kind: str, info: dict) -> bool:
+        """Bu motorun rootless çalışıp çalışmadığını belirler.
+
+        Podman'ın Docker-uyumlu /info yanıtı DOCKER biçimindedir — libpod'un
+        `host.security.rootless` alanı orada YOKTUR. Bu yüzden önce libpod
+        uç noktası denenir, o da yoksa soket yoluna bakılır: `/run/user/<uid>`
+        altındaki bir soket tanım gereği rootless kullanıcı soketidir.
+        """
+        # 1) Docker (ve Podman'ın compat katmanı) SecurityOptions listesi
+        for opt in info.get("SecurityOptions") or []:
+            if "rootless" in str(opt).lower():
+                return True
+
+        # 2) Podman'ın kendi uç noktası
+        if kind == "podman":
+            try:
+                conn = _connection(self.endpoint, self.timeout)
+                conn.request("GET", "/v4.0.0/libpod/info",
+                             headers={"Host": "kontainy",
+                                      "Accept": "application/json"})
+                response = conn.getresponse()
+                data = response.read()
+                conn.close()
+                if response.status < 400 and data:
+                    libpod = json.loads(data)
+                    security = (libpod.get("host") or {}).get("security") or {}
+                    if "rootless" in security:
+                        return bool(security["rootless"])
+            except Exception:                          # noqa: BLE001
+                pass
+
+        # 3) Soket yolu sezgisi — /run/user/<uid>/… her zaman rootless'tır
+        path = self.endpoint.replace("unix://", "")
+        if path.startswith("/run/user/") or "/.local/share/containers" in path:
+            return True
+        return False
 
     def info(self) -> dict:
         return self._request("GET", "/info") or {}
