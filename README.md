@@ -1,67 +1,431 @@
-# kontainy
+<p align="center">
+  <img src="assets/icon.png" alt="kontainy" width="128" height="128">
+</p>
 
-**Docker ve Podman'ın her ayarı, tek arayüzde**
+<h1 align="center">📦 kontainy</h1>
 
-kontainy, Linux sistemlerde (özellikle Arch/CachyOS gibi dağıtımlarda) konteyner
-motorlarının **tüm yapılandırma yüzeyini** bir masaüstü arayüzünden yönetilebilir
-kılan bir araçtır. Docker Desktop ve Podman Desktop "kolay kullanım" için tasarlandı
-ve tam bu yüzden ayarların büyük kısmını ya hiç göstermiyor ya da ham bir JSON
-kutusuna bırakıyor. kontainy bunun tersini yapar: **her ayarı açığa çıkarır,
-ne işe yaradığını anlatır, tuzaklarını söyler.**
+<p align="center">
+  <strong>Every Docker and Podman setting, in one interface</strong><br>
+  <sub>Rival tools hide the settings that matter. kontainy shows all of them — explained, with the gotcha attached</sub>
+</p>
+
+<p align="center">
+  <a href="https://github.com/bayramkotan/kontainy/releases/latest">
+    <img src="https://img.shields.io/github/v/release/bayramkotan/kontainy?style=for-the-badge&color=89b4fa&logo=github" alt="Release">
+  </a>
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-f9e2af?style=for-the-badge" alt="Platform">
+  <a href="https://pypi.org/project/kontainy/">
+    <img src="https://img.shields.io/pypi/v/kontainy?style=for-the-badge&color=a6e3a1&logo=pypi&logoColor=white" alt="PyPI">
+  </a>
+  <a href="https://github.com/bayramkotan/kontainy/stargazers">
+    <img src="https://img.shields.io/github/stars/bayramkotan/kontainy?style=for-the-badge&color=f5c2e7&logo=github" alt="Stars">
+  </a>
+</p>
+
+<p align="center">
+  <a href="#-why-kontainy-exists">Why</a> •
+  <a href="#-educational-by-design">Educational</a> •
+  <a href="#-install">Install</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-the-settings-catalogue">Settings</a> •
+  <a href="#-diagnostics">Diagnostics</a> •
+  <a href="#-templates">Templates</a> •
+  <a href="#-learn">Learn</a> •
+  <a href="#-privilege-model">Privileges</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-build-from-source">Build</a>
+</p>
 
 ---
 
-## Ayrışma noktası
+## 🎯 Why kontainy exists
 
-| | Docker Desktop | Podman Desktop | **kontainy** |
-|---|---|---|---|
-| Container başlat/durdur | ✅ | ✅ | ✅ |
-| `daemon.json` düzenleme | ham JSON kutusu | ✗ | **yapılandırılmış, açıklamalı, doğrulamalı** |
-| `containers.conf` / `storage.conf` | ✗ | ✗ | **tam katalog** |
-| `registries.conf` (short-name-mode) | ✗ | ✗ | **tam katalog** |
-| Ayarın hangi dosyadan geldiği | ✗ | ✗ | **katman zinciri gösterilir** |
-| Tüm motorlar aynı tabloda | ✗ (context'e bağlı) | ✗ (provider seçilir) | **✅ Motor sütunuyla birleşik** |
-| Terminalin gerçek hedefi | ✗ | ✗ | **✅ çözümlenmiş zincir** |
-| Tuzak/teşhis açıklamaları | ✗ | ✗ | **✅ ayar başına** |
+Run Docker and Podman on the same machine for a week and you will meet all of
+this: `docker context use` reports success and changes nothing, containers
+"disappear" after installing Docker Desktop, a memory limit is accepted and
+silently ignored, a log file quietly fills the root disk, and `podman pull
+nginx` fails on a name that works everywhere else.
 
----
+None of these produce an error message. That is the problem kontainy is built
+around.
 
-## Temel ilke: context sistemine güvenme
+**kontainy does not trust the context system.** It connects to *every* socket
+it finds, separately, and shows them all in one table with an Engine column. A
+container is never lost — you can see which engine holds it.
 
-`docker` CLI hedefini şu öncelikle belirler:
+<p align="center">
+  <img src="assets/screenshots/engines.png" alt="Engines — the resolved context chain and every reachable engine" width="850">
+</p>
+
+The `docker` CLI resolves its target through five layers, and the top one wins:
 
 ```
-1. -H / --host bayrağı
-2. DOCKER_HOST ortam değişkeni
-3. DOCKER_CONTEXT ortam değişkeni
+1. -H / --host flag
+2. DOCKER_HOST environment variable
+3. DOCKER_CONTEXT environment variable
 4. ~/.docker/config.json → currentContext
 5. unix:///var/run/docker.sock
 ```
 
-`DOCKER_HOST` ayarlıysa context **tamamen yok sayılır** — `docker context use`
-"başarılı" der, hiçbir şey değişmez. "Container'larım kayboldu" şikayetinin bir
-numaralı sebebi budur.
-
-kontainy bu zincire girmez. Bulduğu **her** soketle ayrı ayrı konuşur ve hepsini
-aynı anda listeler. Bir container hiçbir zaman kaybolmaz; yalnızca başka bir
-motorda olduğu görülür.
+If `DOCKER_HOST` is set, the context is ignored completely — which is why
+`docker context use` can say "success" and do nothing at all. kontainy shows
+this chain layer by layer and marks the winner.
 
 ---
 
-## Desteklenen motorlar
+## 🎓 Educational by Design
 
-- **Docker** — yerel daemon, Docker Desktop for Linux, Rancher Desktop, Colima
-- **Podman** — rootful ve rootless soketler
-- **Kubernetes / K3s** — context ve pod izleme *(planlı)*
-- **Compose** — `docker compose` ve `podman-compose` *(planlı)*
+kontainy never hides the command it is running. Create a container, change a
+setting, apply a fix — the **exact shell command** appears in the command strip
+at the bottom of every page, ready to copy. Every command is also written to a
+persistent history you can export as a shell script.
 
-Podman soketi Docker Engine API v1.41 ile uyumlu olduğundan tek bir istemci
-ikisini de konuşur. Harici bağımlılık yoktur — `docker-py` veya `requests`
-gerekmez, UNIX soketi üzerinden doğrudan JSON okunur.
+The point is not convenience. The point is that you should be able to do the
+same thing **without kontainy** afterwards.
+
+<p align="center">
+  <img src="assets/screenshots/create_container.png" alt="Create Container — live command preview growing as options are set" width="850">
+</p>
+
+This runs through the whole application:
+
+- **Create Container** — the preview grows as you tick boxes, syntax
+  highlighted, and the same definition renders as a `docker run` command, a
+  systemd Quadlet unit, or a compose service
+- **Settings** — every key shows its CLI equivalent, which file it lives in,
+  and whether a restart is needed
+- **Diagnostics** — every finding ends in a command, and says whether it runs
+  in user scope or needs root
+- **Learn** — every snippet is a command you can actually type, with a Copy
+  button
+- **History & Log** — every command this session, filterable, exportable
 
 ---
 
-## Kurulum
+## 📦 Install
+
+```bash
+pip install kontainy
+kontainy
+```
+
+<details>
+<summary><b>🐧 On Linux, pip may refuse to install</b></summary>
+<br>
+
+Most current distributions mark the system Python as *externally managed*
+(PEP 668), so a plain `pip install` stops with
+`error: externally-managed-environment`. Two ways around it:
+
+```bash
+# Isolated — recommended, no system packages touched
+pipx install kontainy
+
+# Into the system Python — needs the override flag
+sudo pip install kontainy --break-system-packages --no-cache-dir -U
+```
+
+The same flag applies when upgrading a system-wide install later on.
+
+</details>
+
+Or download the standalone binary — **no Python required:**
+
+| Platform | File | Notes |
+|:--------:|:-----|:------|
+| 🐧 **Linux** | [`kontainy-x86_64.AppImage`](https://github.com/bayramkotan/kontainy/releases/latest) | `chmod +x` then run — the fully supported target |
+| 🪟 **Windows** | [`kontainy.exe`](https://github.com/bayramkotan/kontainy/releases/latest) | Portable. Docker Desktop and `podman machine` only |
+| 🍎 **macOS** | [`kontainy-macOS-arm64`](https://github.com/bayramkotan/kontainy/releases/latest) | Apple Silicon |
+
+> **Linux is the first-class target.** Rootless Podman, Quadlet, systemd units,
+> subuid mapping and linger only exist there, and roughly half the diagnostic
+> rules are Linux-specific. The Windows and macOS builds work against Docker
+> Desktop and `podman machine`, and disable what does not apply.
+
+---
+
+## ✨ Features
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🔌 Engine discovery
+- Connects to **every socket found**, never just the active context
+- Docker local daemon, Docker Desktop for Linux, Rancher Desktop, Colima
+- Podman **rootful and rootless** sockets
+- Resolved CLI target chain, with the winning layer marked
+- Detects the `podman-docker` shim (`docker` that is really Podman)
+- **No external dependencies** — talks the Docker Engine API over the UNIX
+  socket directly, no `docker-py`, no `requests`
+
+### 📦 Containers
+- Every engine in **one table**, with an Engine column
+- Start, stop, restart, remove
+- Summary, port map and raw JSON inspection
+- Create with the **full run surface** (see below)
+- 17 ready-made templates
+
+</td>
+<td width="50%" valign="top">
+
+### ⚙️ Settings
+- **152 keys** across Docker and Podman
+- Declared value, **effective value**, and the file it came from
+- The full override chain: `/usr/share` → `/etc` → `~/.config`
+- Red flag when declared and effective disagree — the setting is being ignored
+- **65 keys editable** without elevation; the rest read-only with a command
+- Comment-preserving TOML writes, atomic, with a `.bak` backup
+
+### 🔬 Diagnostics
+- **19 rules**: detect → explain → fix command
+- Each links to a catalogue key and a Learn topic
+- Detection never requires root
+
+### 📚 Learn
+- 16 categories, from namespaces to Kubernetes, KVM and LXC
+- Syntax-highlighted, copyable snippets
+
+</td>
+</tr>
+</table>
+
+---
+
+## ⚙️ The settings catalogue
+
+This is what kontainy is for. Docker Desktop and Podman Desktop were designed
+for ease of use, and hide most of the configuration surface as a result —
+`daemon.json` gets a raw JSON box with no explanation, `containers.conf` gets
+nothing at all.
+
+|  | Docker Desktop | Podman Desktop | **kontainy** |
+|---|:---:|:---:|:---:|
+| Start / stop containers | ✅ | ✅ | ✅ |
+| `daemon.json` editing | raw JSON box | ✗ | **structured, explained, validated** |
+| `containers.conf` / `storage.conf` | ✗ | ✗ | **full catalogue** |
+| `registries.conf`, `short-name-mode` | ✗ | ✗ | **full catalogue** |
+| Which file a value came from | ✗ | ✗ | **override chain shown** |
+| Declared vs effective value | ✗ | ✗ | **compared, mismatch flagged** |
+| All engines in one table | ✗ | ✗ | **✅ with Engine column** |
+| Where your terminal points | ✗ | ✗ | **✅ resolved chain** |
+| Gotcha note per setting | ✗ | ✗ | **✅ 66 of 152** |
+
+**152 settings** — 56 Docker, 67 Podman, 29 shared — spread across ten
+surfaces:
+
+| Surface | Keys | Covers |
+|:---|:---:|:---|
+| 🌐 Networking | 25 | address pools, bridge, MTU, DNS, iptables/nftables, netavark, pasta |
+| 🔐 Security | 23 | capabilities, seccomp, AppArmor, SELinux, user namespaces |
+| 📊 Resource limits | 23 | memory, CPU, PIDs, ulimits, block I/O, OOM |
+| ⚙️ Engine / Daemon | 19 | runtimes, cgroup manager, live restore, events |
+| 📦 Registry | 18 | mirrors, insecure registries, short-name mode, pull policy |
+| 🧱 Container | 14 | restart policy, healthcheck, mounts, init, timezone |
+| 💾 Storage | 13 | drivers, graphroot, overlay options, quotas |
+| 🔧 systemd / Quadlet | 8 | `.container` unit keys, auto-update, linger |
+| 📝 Logging | 6 | drivers and rotation |
+| 🏗️ Build | 3 | BuildKit and cache garbage collection |
+
+Every entry carries: the key, the file it lives in, its type and valid choices,
+the default, the **CLI equivalent**, whether a restart is needed, user or root
+scope, a risk level, a description — and for 66 of them, the **gotcha**: what
+breaks when the setting is misunderstood.
+
+> Listing a setting is easy. Writing down what happens when it is wrong is not,
+> and no rival tool does it.
+
+---
+
+## 🔬 Diagnostics
+
+The equivalent of a linter for your container setup. Every rule says three
+things: what was found, why it happens, and the command that fixes it.
+
+<p align="center">
+  <img src="assets/screenshots/diagnostics.png" alt="Diagnostics — findings with explanation and fix command" width="850">
+</p>
+
+**19 rules**, none of which need root to detect:
+
+| Group | Rules | Examples |
+|:---|:---:|:---|
+| **CTX** context | 6 | `DOCKER_HOST` overriding the context · Desktop leftovers (`credsStore`) · CLI plugins shadowing the distribution's · the `podman-docker` shim |
+| **POD** Podman / rootless | 4 | socket not enabled · linger off, so containers die at logout · missing `subuid` range · auto-update timer inactive |
+| **NET** networking | 3 | Docker address pool clashing with the local network or VPN · rootless ports below 1024 · nftables without the iptables layer |
+| **DSK** disk | 2 | unlimited `json-file` logs filling the root disk · BuildKit cache that `image prune` does not touch |
+| **RES** resources | 1 | cgroupfs on rootless cgroup v2, where limits are silently ignored |
+| **SVC** systemd | 1 | `docker.socket` restarting the daemon you just stopped |
+| **DKR** Docker Desktop | 1 | `/dev/kvm` missing or not readable |
+| **PER** permissions | 1 | socket permission denied, group membership not yet applied |
+
+---
+
+## 📦 Templates
+
+*You should not have to hunt for example code.* Seventeen ready-made
+definitions, each carrying the details people get wrong when copying from a
+blog post: the named volume that keeps the data, the environment variable the
+image will not start without, a health start period long enough for the service
+to come up, and a capability set that is not simply `--privileged`.
+
+| Category | Templates |
+|:---|:---|
+| **Databases** | PostgreSQL 16 · MariaDB 11 · Redis 7 · MongoDB 7 |
+| **Web** | nginx · Caddy 2 · Traefik 3 |
+| **Tooling** | MinIO · Gitea · Vaultwarden · n8n · Pi-hole |
+| **Monitoring** | Grafana · Prometheus |
+| **Development** | JupyterLab · code-server · Ollama |
+
+Each renders three ways from the same definition:
+
+<details>
+<summary><b>📋 PostgreSQL, all three formats</b></summary>
+<br>
+
+```bash
+podman run -d \
+  --name postgres \
+  --restart=unless-stopped \
+  -p 5432:5432 \
+  -v pgdata:/var/lib/postgresql/data \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=<CHANGE_ME> \
+  --cap-drop=ALL \
+  --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER \
+  --cap-add=SETGID --cap-add=SETUID \
+  --memory=1g \
+  --health-cmd='pg_isready -U postgres' \
+  --health-start-period=30s \
+  docker.io/library/postgres:16
+```
+
+```ini
+[Unit]
+Description=PostgreSQL 16
+
+[Container]
+Image=docker.io/library/postgres:16
+PublishPort=5432:5432
+Volume=pgdata:/var/lib/postgresql/data
+Environment=POSTGRES_PASSWORD=CHANGE_ME
+DropCapability=ALL
+AddCapability=CHOWN
+AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
+```
+
+```yaml
+services:
+  postgres:
+    image: docker.io/library/postgres:16
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    cap_drop:
+      - ALL
+
+volumes:
+  pgdata:
+```
+
+</details>
+
+**Quadlet generation is the part no other GUI has.** `podman generate systemd`
+is deprecated; Quadlet replaced it, and nothing but a text editor writes those
+units today.
+
+---
+
+## 🧱 Create Container
+
+Rival tools give you image, name, ports and volumes. kontainy gives you the
+whole surface, across seven tabs, with a live command preview underneath:
+
+| Tab | Covers |
+|:---|:---|
+| **Basics** | image, name, command, entrypoint, working dir, user, restart policy, environment, labels |
+| **Network** | network mode, published ports, hostname, DNS, extra hosts |
+| **Storage** | volumes and bind mounts with `:ro` `:z` `:Z` propagation, tmpfs, read-only root, shm size |
+| **Resources** | memory, swap, CPUs, cpuset, shares, PID limit, ulimits, OOM score |
+| **Security** | privileged, no-new-privileges, user namespace, seccomp, AppArmor, SELinux, **18 capability checkboxes** |
+| **Health** | command, interval, timeout, retries, start period |
+| **Advanced** | init, TTY, log driver and options, sysctls, devices, pod, passthrough flags |
+
+---
+
+## 📚 Learn
+
+kontainy teaches container management, not kontainy. **16 categories**,
+target 204 topics, each with explanation, diagram, table and runnable snippet.
+
+| Category | Topics | Covers |
+|:---|:---:|:---|
+| ⚡ Quick Start | 8 | first container, ports, volumes, cleanup |
+| 📦 Container Internals | 14 | namespaces, cgroups v1/v2, capabilities, overlayfs, OCI specs |
+| 🐳 Docker | 18 | architecture, run flags, contexts, `daemon.json`, BuildKit |
+| 🦭 Podman | 18 | daemonless design, rootless, pods, `containers.conf` |
+| ⚙️ systemd & Quadlet | 10 | units, linger, socket activation, `.container` files |
+| ☸️ Kubernetes | 20 | pods, deployments, services, kubeconfig, probes, RBAC |
+| 🖥️ KVM / QEMU / libvirt | 12 | domain XML, qcow2, virtio, snapshots, VFIO passthrough |
+| 🧱 LXC / LXD / Incus | 10 | system containers, idmap, storage pools, clustering |
+| 🌐 Networking | 14 | bridges, macvlan, DNS, nftables, MTU, subnet clashes |
+| 💾 Storage | 12 | volumes, bind mounts, overlay2, quotas, SELinux labels |
+| 🔐 Security | 14 | rootless, capabilities, seccomp, signing, scanning, SBOM |
+| 🏗️ Images & Registries | 12 | manifests, digests, multi-arch, buildah, skopeo, mirrors |
+| 🎼 Compose & Orchestration | 10 | compose schema, profiles, healthchecks |
+| 🔍 Troubleshooting | 14 | lost containers, permissions, full disks, exit codes |
+| 🚀 Performance | 10 | crun vs runc, overlay vs fuse, cache strategy |
+| 🔄 Migration & Interop | 8 | Docker to Podman, the shim, Desktop leftovers, WSL2, CI |
+
+Diagnostic rules link into Learn: the rule tells you *what to do*, the topic
+explains *why*.
+
+---
+
+## 🔐 Privilege model
+
+**kontainy never elevates privileges.** No `pkexec`, no `sudo`, no `runas`.
+
+| File | Scope | What kontainy does |
+|:---|:---:|:---|
+| `~/.config/containers/containers.conf` | 👤 user | **writes** |
+| `~/.config/containers/storage.conf` | 👤 user | **writes** |
+| `~/.config/containers/registries.conf` | 👤 user | **writes** |
+| `~/.config/containers/systemd/*` (Quadlet) | 👤 user | **writes** |
+| `~/.docker/config.json` | 👤 user | **writes** |
+| `/etc/docker/daemon.json` | 🖥 root | read-only + copyable command |
+| `/etc/containers/*` | 🖥 root | read-only + copyable command |
+| `/etc/subuid`, `/etc/subgid` | 🖥 root | read-only + copyable command |
+| `/usr/share/containers/*` | 📦 distribution | read-only, shown in the override chain |
+
+Writes take a `.bak` backup, land atomically through `os.replace` — a
+half-written `daemon.json` stops the daemon from starting at all — and preserve
+existing comments in TOML files, including the ones explaining the very setting
+being changed.
+
+Rootless Podman keeps its entire configuration under `~/.config`, which is why
+this model costs so little: **65 of the 152 settings are directly editable.**
+
+---
+
+## 🚀 Quick Start
+
+### From PyPI
+
+```bash
+pip install kontainy
+kontainy
+```
+
+### From source
 
 ```bash
 git clone https://github.com/bayramkotan/kontainy.git
@@ -71,100 +435,110 @@ python -m venv .venv
 .venv/bin/python main.py
 ```
 
-GUI açmadan teşhis:
+### Linux — system dependencies
+
+PySide6 needs the XCB platform libraries. On a minimal install:
 
 ```bash
-.venv/bin/python main.py --scan     # motorlar ve context zinciri
-.venv/bin/python main.py --doctor   # teşhis kuralları
-.venv/bin/python main.py --stats    # katalog/kural/Learn sayımları
+# Arch / CachyOS
+sudo pacman -S --needed libxcb xcb-util-cursor xcb-util-keysyms \
+  xcb-util-wm xcb-util-image xcb-util-renderutil libxkbcommon-x11
+
+# Debian / Ubuntu
+sudo apt install libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 \
+  libxkbcommon-x11-0 libxcb-keysyms1 libxcb-image0 libxcb-render-util0
+
+# Fedora
+sudo dnf install xcb-util-cursor xcb-util-keysyms xcb-util-wm \
+  xcb-util-image xcb-util-renderutil libxkbcommon-x11
+```
+
+For Podman support, enable the API socket:
+
+```bash
+systemctl --user enable --now podman.socket
+loginctl enable-linger $USER    # so containers survive logout
+```
+
+### CLI
+
+kontainy answers three questions without opening a window:
+
+```bash
+kontainy --scan      # the context chain, every engine, systemd unit states
+kontainy --doctor    # run every diagnostic rule and print the findings
+kontainy --stats     # catalogue, rule and Learn counts
+```
+
+```console
+$ kontainy --scan
+=== Terminal target ===
+  >> DOCKER_HOST (environment)          unix:///home/you/.docker/desktop/docker.sock
+     DOCKER_CONTEXT (environment)       —
+     config.json → currentContext       desktop-linux
+     built-in default                   unix:///var/run/docker.sock
+  EFFECTIVE: unix:///home/you/.docker/desktop/docker.sock
+
+=== Engines found ===
+ * unix:///home/you/.docker/desktop/docker.sock   docker 29.8.0 (rootful)
+   unix:///run/user/1000/podman/podman.sock       podman 6.1.2 (rootless)
+   unix:///run/docker.sock                        docker 29.8.1 (rootful)
 ```
 
 ---
 
-## Proje yapısı
+## 📸 Screenshots
 
-```text
-kontainy/
-├── main.py                      # Giriş noktası: --scan · --doctor · --stats
-└── src/
-    ├── core/
-    │   ├── constants.py         # Sürüm ve uygulama sabitleri
-    │   ├── api.py               # UNIX soketi üzerinden Docker Engine API
-    │   ├── discovery.py         # Motor keşfi + terminal hedefi zinciri
-    │   └── catalog/             # AYAR KATALOĞU — projenin kalbi
-    │       ├── base.py          #   Setting dataclass'ı, yüzeyler, dosyalar
-    │       ├── docker.py        #   daemon.json + ~/.docker/config.json
-    │       ├── podman.py        #   containers.conf + storage.conf + registries.conf
-    │       ├── run_flags.py     #   container başına çalıştırma bayrakları
-    │       └── quadlet.py       #   systemd birim anahtarları
-    ├── rules/                   # TEŞHİS MOTORU
-    │   ├── engine.py            #   ortam fotoğrafı + Rule/Finding
-    │   └── catalog.py           #   kural seti
-    ├── learn/
-    │   └── content.py           # LEARN İÇERİĞİ — 16 kategori
-    ├── gui/
-    │   ├── main_window.py       # kenar çubuğu + sayfa yığını
-    │   ├── theme.py             # palet ve QSS
-    │   └── pages/               # engines · containers · settings · gotchas
-    │       └── …                #   diagnostics · learn · logs
-    └── utils/
-        ├── config.py            # ayar deposu, günlük, komut geçmişi
-        └── workers.py           # arka plan işleri (çökme dersi burada)
+<p align="center">
+  <img src="assets/screenshots/settings.png" alt="Settings — declared value, effective value and the override chain" width="850">
+</p>
+<p align="center">
+  <img src="assets/screenshots/learn.png" alt="Learn — collapsible topic cards with highlighted snippets" width="850">
+</p>
+<p align="center">
+  <img src="assets/screenshots/containers.png" alt="Containers — every engine in one table" width="850">
+</p>
+
+---
+
+## 🏗️ Build from source
+
+Builds are made in CI, on each platform's own runner — there is no
+cross-compilation. Pushing a `v*` tag runs the whole pipeline: tests, then
+Windows, macOS ARM64 and Linux AppImage builds, then a GitHub release with a
+categorised changelog, then PyPI.
+
+```bash
+python build.py            # one file, windowed   -> dist/kontainy[.exe]
+python build.py --debug    # one file, console
+python build.py --onedir   # a directory          -> dist/kontainy/
 ```
 
-### `settings_catalog.py` — projenin kalbi
+Run the test suite — 245 tests in under four seconds, because PySide6 is
+stubbed and the suite covers decisions rather than widgets:
 
-Her ayar yapısal veri olarak tanımlanır; arayüz bu katalogtan **üretilir**,
-hiçbir ayar GUI'ye elle gömülmez.
-
-```python
-S("default-address-pools", "docker", SURFACE_NETWORK, "docker.daemon", "list",
-  "Varsayılan Adres Havuzları",
-  "Docker'ın kendi ağlarını hangi IP bloklarından üreteceği...",
-  restart=True, danger=1,
-  gotcha="KURUMSAL AĞ ÇAKIŞMASI: varsayılan 172.17.0.0/16 birçok VPN ile "
-         "çakışır; Docker kurulunca VPN'in tamamı erişilemez olur...")
+```bash
+pip install pytest
+python -m pytest -q
 ```
 
-Alanlar: anahtar, motor, yüzey, dosya, tür, seçenekler, varsayılan, CLI karşılığı,
-yeniden başlatma gerekiyor mu, kullanıcı/root kapsamı, risk düzeyi, açıklama,
-**tuzak notu**, doküman bağlantısı.
+---
 
-Mevcut durum: **152 ayar** — 56 Docker, 67 Podman, 29 ortak.
-102 tanesi root gerektirmez, 66 tanesinde tuzak notu vardır.
+## 🌍 Translations
+
+The interface is English. A translation layer covering eleven languages is
+planned; see the project roadmap.
 
 ---
 
-## Yetki politikası
+## 📝 License
 
-kontainy **hiçbir zaman yetki yükseltmez**. Kullanıcı kapsamındaki dosyalar
-(`~/.config/containers/*`, `~/.docker/config.json`, kullanıcı systemd birimleri)
-doğrudan yönetilir. Root gerektiren dosyalar (`/etc/docker/daemon.json`,
-`/etc/containers/*`, `/etc/subuid`) **salt okunur gösterilir** ve yanında
-kopyalanabilir komut verilir.
+MIT — see [LICENSE](LICENSE).
 
-Rootless Podman'ın tüm yapılandırması zaten `~/.config` altında olduğundan
-asıl güç oradadır.
+<div align="center">
 
----
+⭐ **If kontainy helps you, consider [giving it a star](https://github.com/bayramkotan/kontainy)!** ⭐
 
-## Yol haritası
+[🐛 Report Bug](https://github.com/bayramkotan/kontainy/issues) · [💡 Request Feature](https://github.com/bayramkotan/kontainy/issues)
 
-- [x] Motor keşfi — tüm soketler, context'e güvenmeden
-- [x] Terminal hedefi çözümleme zinciri
-- [x] Birleşik container tablosu (Motor sütunlu)
-- [x] Ayar kataloğu + arama/süzme/ayrıntı arayüzü
-- [ ] Ayar değerlerini gerçekten okuma (beyan edilen / etkin / hangi dosyadan)
-- [ ] Kullanıcı kapsamlı ayarları yazma
-- [ ] Teşhis motoru (kural tabanlı: subuid, linger, subnet çakışması, nftables…)
-- [ ] Quadlet üretici (`.container`, `.pod`, `.network`, `.volume`)
-- [ ] Olay akışı (`/events`) ile canlı tablo
-- [ ] Log görüntüleyici (çoklanmış akış çözümlü)
-- [ ] Kubernetes context ve pod izleme
-- [ ] Compose entegrasyonu
-
----
-
-## Lisans
-
-MIT
+</div>
