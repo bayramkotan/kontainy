@@ -30,6 +30,7 @@ try:                                                        # Python 3.11+
 except ModuleNotFoundError:                                 # pragma: no cover
     tomllib = None
 
+from ..utils import fs
 from ..utils.config import log
 
 MISSING = object()          # distinct from None, which is a real value
@@ -59,16 +60,17 @@ def _xdg_config() -> Path:
 
 
 def _read_json(path: Path) -> tuple:
-    if not path.is_file():
+    text = fs.read_text(path)
+    if not text:
         return {}, ""
     try:
-        return json.loads(path.read_text(encoding="utf-8")), ""
-    except (OSError, json.JSONDecodeError) as exc:
+        return json.loads(text), ""
+    except json.JSONDecodeError as exc:
         return {}, str(exc)
 
 
 def _read_toml(path: Path) -> tuple:
-    if not path.is_file():
+    if not fs.is_file(path):
         return {}, ""
     if tomllib is None:
         return {}, "tomllib unavailable (needs Python 3.11+)"
@@ -115,7 +117,7 @@ def read_chain(file_key: str) -> list:
     for label, path, writable, reader in CHAINS.get(file_key, []):
         data, error = reader(path)
         layers.append(Layer(label=label, path=path, writable=writable,
-                            exists=path.is_file(), data=data, error=error))
+                            exists=fs.is_file(path), data=data, error=error))
     return layers
 
 

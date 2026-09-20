@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from ..utils import fs
 from .api import EngineClient, EngineError, EngineInfo
 
 
@@ -97,12 +98,12 @@ def podman_socket_candidates() -> list:
 #  Context dosyaları
 # ---------------------------------------------------------------------------
 def docker_cli_config() -> dict:
-    path = Path.home() / ".docker" / "config.json"
-    if not path.is_file():
+    text = fs.read_text(Path.home() / ".docker" / "config.json")
+    if not text:
         return {}
     try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+        return json.loads(text)
+    except json.JSONDecodeError:
         return {}
 
 
@@ -114,12 +115,12 @@ def docker_contexts() -> list:
     """
     out = []
     meta_dir = Path.home() / ".docker" / "contexts" / "meta"
-    if not meta_dir.is_dir():
+    if not fs.is_dir(meta_dir):
         return out
-    for meta in meta_dir.glob("*/meta.json"):
+    for meta in fs.glob(meta_dir, "*/meta.json"):
         try:
-            data = json.loads(meta.read_text())
-        except (OSError, json.JSONDecodeError):
+            data = json.loads(fs.read_text(meta) or "{}")
+        except json.JSONDecodeError:
             continue
         name = data.get("Name", "?")
         host = (data.get("Endpoints", {}).get("docker", {}) or {}).get("Host", "")
@@ -135,16 +136,13 @@ def kube_contexts() -> list:
     if env:
         paths.extend(Path(p).expanduser() for p in env.split(":") if p)
     default = Path.home() / ".kube" / "config"
-    if default.is_file():
+    if fs.is_file(default):
         paths.append(default)
 
     names = []
     for path in paths:
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text()
-        except OSError:
+        text = fs.read_text(path)
+        if not text:
             continue
         # Küçük bir YAML alt kümesi — pyyaml bağımlılığı eklemeden context adlarını al.
         for line in text.splitlines():
@@ -256,12 +254,17 @@ def discover(probe: bool = True) -> list:
 
     # 3) Bilinen Docker soketleri
     for path, label in DOCKER_SOCKET_CANDIDATES:
-        if Path(path).exists():
+        if fs.exists(path):
             add(path, label, "docker")
 
-    # 4) Bilinen Podman soketleri
+    # 4) Known Podman sockets
+    #
+    # fs.exists rather than Path.exists: /run/podman is root-owned and mode
+    # 0700 on most distributions, so a plain exists() call RAISES
+    # PermissionError for an ordinary user whenever rootful Podman is
+    # installed. Discovery has to survive a socket it cannot see.
     for path, label in podman_socket_candidates():
-        if Path(path).exists():
+        if fs.exists(path):
             add(path, label, "podman")
 
     endpoints = list(found.values())

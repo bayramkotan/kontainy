@@ -25,6 +25,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..utils import fs
 from ..utils.config import log
 from . import discovery
 from .api import EngineError
@@ -85,11 +86,8 @@ def find_variable_source(name: str) -> list:
     hits = []
 
     def scan(path: Path):
-        try:
-            if not path.is_file() or path.stat().st_size > 512_000:
-                return
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        text = fs.read_text(path, limit=512_000)
+        if not text:
             return
         for index, line in enumerate(text.splitlines(), 1):
             if pattern.match(line) and not line.strip().startswith("#"):
@@ -97,12 +95,9 @@ def find_variable_source(name: str) -> list:
 
     for entry in SHELL_FILES:
         path = Path(os.path.expanduser(entry))
-        if path.is_dir():
-            try:
-                for child in sorted(path.iterdir()):
-                    scan(child)
-            except OSError:
-                continue
+        if fs.is_dir(path):
+            for child in fs.iterdir(path):
+                scan(child)
         else:
             scan(path)
     return hits

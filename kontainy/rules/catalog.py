@@ -22,6 +22,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from ..utils import fs
 from .engine import ERROR, INFO, WARN, Rule
 
 # ---------------------------------------------------------------------------
@@ -229,17 +230,14 @@ def _dsk02(env):
 # ---------------------------------------------------------------------------
 def _res01(env):
     """cgroup v2 plus rootless plus cgroupfs: limits are silently ignored."""
-    if not Path("/sys/fs/cgroup/cgroup.controllers").exists():
+    if not fs.exists("/sys/fs/cgroup/cgroup.controllers"):
         return None
     rootless = [e for e in env.endpoints
                 if e.reachable and e.info and e.info.rootless]
     if not rootless:
         return None
     user_conf = Path.home() / ".config/containers/containers.conf"
-    try:
-        text = user_conf.read_text(encoding="utf-8") if user_conf.is_file() else ""
-    except OSError:
-        text = ""
+    text = fs.read_text(user_conf)
     if "cgroupfs" not in text:
         return None
     return {"path": str(user_conf)}

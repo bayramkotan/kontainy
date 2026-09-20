@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ..core import discovery
+from ..utils import fs
 from ..utils.config import log
 
 # --- Önem düzeyleri --------------------------------------------------------
@@ -83,8 +84,8 @@ class Environment:
 
 def _read_json(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        return json.loads(fs.read_text(path) or "{}")
+    except json.JSONDecodeError:
         return {}
 
 
@@ -97,12 +98,9 @@ def _run(cmd: list, timeout: float = 5.0) -> str:
 
 
 def _subid_has_user(path: str, username: str) -> bool:
-    try:
-        for line in Path(path).read_text(encoding="utf-8").splitlines():
-            if line.split(":", 1)[0].strip() == username:
-                return True
-    except OSError:
-        pass
+    for line in fs.read_text(path).splitlines():
+        if line.split(":", 1)[0].strip() == username:
+            return True
     return False
 
 
@@ -160,19 +158,15 @@ def collect(probe: bool = True) -> Environment:
     routes = _run(["ip", "-4", "route"])
     env.host_routes = [ln.strip() for ln in routes.splitlines() if ln.strip()]
 
-    kvm = Path("/dev/kvm")
-    env.kvm_present = kvm.exists()
+    env.kvm_present = fs.exists("/dev/kvm")
     env.kvm_readable = os.access("/dev/kvm", os.R_OK | os.W_OK) if env.kvm_present \
         else False
 
     for label, path in [("user", Path.home() / ".docker/cli-plugins"),
                         ("system", Path("/usr/lib/docker/cli-plugins")),
                         ("libexec", Path("/usr/libexec/docker/cli-plugins"))]:
-        if path.is_dir():
-            try:
-                env.cli_plugin_dirs[label] = sorted(p.name for p in path.iterdir())
-            except OSError:
-                env.cli_plugin_dirs[label] = []
+        if fs.is_dir(path):
+            env.cli_plugin_dirs[label] = [p.name for p in fs.iterdir(path)]
 
     log().debug("Teşhis ortamı toplandı: %d endpoint, %d grup",
                 len(env.endpoints), len(env.user_groups))
