@@ -11,7 +11,7 @@ VenvStudio uses:
 
 Builds are made in CI, never locally — see the handoff.
 
-⚠️ kontainy lives under ``src/`` and loads nothing from disk at runtime: the
+⚠️ The `kontainy` package loads nothing from disk at runtime: the
 settings catalogue, the diagnostic rules and the Learn content are all Python
 modules, so they are collected as code rather than as data files. What DOES
 need declaring is the Qt platform plugin set, because PyInstaller's automatic
@@ -38,9 +38,9 @@ ICON_ICNS = ROOT / "assets" / "icon.icns"
 # Imported dynamically or only from inside Qt, so PyInstaller cannot see them.
 HIDDEN_IMPORTS = [
     "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets",
-    "src.core.catalog.docker", "src.core.catalog.podman",
-    "src.core.catalog.run_flags", "src.core.catalog.quadlet",
-    "src.rules.catalog", "src.learn.content", "src.core.templates",
+    "kontainy.core.catalog.docker", "kontainy.core.catalog.podman",
+    "kontainy.core.catalog.run_flags", "kontainy.core.catalog.quadlet",
+    "kontainy.rules.catalog", "kontainy.learn.content", "kontainy.core.templates",
 ]
 
 # PySide6 ships far more than kontainy uses; excluding the heavy modules keeps
@@ -57,7 +57,7 @@ EXCLUDES = [
 
 def version() -> str:
     """Read APP_VERSION without importing PySide6."""
-    text = (ROOT / "src" / "core" / "constants.py").read_text(encoding="utf-8")
+    text = (ROOT / "kontainy" / "core" / "constants.py").read_text(encoding="utf-8")
     for line in text.splitlines():
         if line.startswith("APP_VERSION"):
             return line.split("=", 1)[1].strip().strip('"\'')
@@ -84,8 +84,8 @@ def build(onedir: bool = False, debug: bool = False) -> int:
         "--name", APP,
         "--noconfirm", "--clean",
         "--onedir" if onedir else "--onefile",
-        # src/ is a package tree imported as `src.*`; PyInstaller needs the
-        # root on the search path or every `from src.core…` import fails at
+        # The package is imported as `kontainy.*`; PyInstaller needs the
+        # root on the search path or every `from kontainy.core…` import fails at
         # analysis time.
         "--paths", str(ROOT),
     ]
@@ -97,8 +97,8 @@ def build(onedir: bool = False, debug: bool = False) -> int:
     for module in EXCLUDES:
         command += ["--exclude-module", module]
 
-    # Collect the whole src package so nothing is dropped by static analysis.
-    command += ["--collect-submodules", "src"]
+    # Collect the whole package so nothing is dropped by static analysis.
+    command += ["--collect-submodules", "kontainy"]
 
     if platform.system() == "Linux":
         # Without the platform plugins the binary starts and immediately dies

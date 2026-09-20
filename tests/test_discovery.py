@@ -2,7 +2,7 @@
 
 import os
 
-from src.core import discovery
+from kontainy.core import discovery
 
 
 def _clear(monkeypatch):

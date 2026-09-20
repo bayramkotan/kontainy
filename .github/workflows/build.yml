@@ -406,8 +406,9 @@ jobs:
 
       - name: Build package
         run: |
-          # build.py is the PyInstaller driver, not a setuptools build script.
-          # Leaving it in place makes `python -m build` try to use it.
+          # build.py is the PyInstaller driver, not a setuptools build
+          # script, but setuptools' legacy autodiscovery picks up a root
+          # build.py and tries to use it. Move it aside for the duration.
           mv build.py _pyinstaller_build.py.bak
           python -m build
           mv _pyinstaller_build.py.bak build.py

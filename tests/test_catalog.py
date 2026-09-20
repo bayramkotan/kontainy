@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.core import catalog
+from kontainy.core import catalog
 
 
 def test_catalogue_is_not_empty():

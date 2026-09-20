@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.core import writers
+from kontainy.core import writers
 
 
 def test_toml_edit_preserves_comments(tmp_path):

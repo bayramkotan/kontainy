@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.rules import RULES, Environment, run_rules
+from kontainy.rules import RULES, Environment, run_rules
 
 
 def test_rule_ids_are_unique():

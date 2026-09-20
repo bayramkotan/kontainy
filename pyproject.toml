@@ -5,35 +5,51 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kontainy"
 version = "0.0.1"
-description = "Docker ve Podman'ın her ayarı, tek arayüzde — Linux masaüstü konteyner yönetim aracı"
+description = "Every Docker and Podman setting, in one interface - a desktop manager for containers, with diagnostics and built-in learning"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Bayram Kotan" }]
-keywords = ["docker", "podman", "container", "kubernetes", "gui", "pyside6", "linux"]
+keywords = [
+    "docker", "podman", "container", "containers", "kubernetes", "quadlet",
+    "systemd", "rootless", "oci", "devops", "gui", "pyside6", "qt", "linux",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
+    "Topic :: System :: Installation/Setup",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Education",
 ]
 dependencies = ["PySide6>=6.6"]
 
 [project.urls]
 Homepage = "https://github.com/bayramkotan/kontainy"
 Repository = "https://github.com/bayramkotan/kontainy"
+Issues = "https://github.com/bayramkotan/kontainy/issues"
+Changelog = "https://github.com/bayramkotan/kontainy/releases"
 
 [project.scripts]
-kontainy = "main:main"
-kty = "main:main"
+kontainy = "kontainy.__main__:main"
+kty = "kontainy.__main__:main"
 
 [tool.setuptools]
+# The import package is named after the project on purpose. Shipping a
+# top-level "src" package or a bare "main" module would collide with every
+# other distribution that does the same, and would shadow anything the user
+# imports by that name.
 packages = [
-    "src", "src.core", "src.core.catalog", "src.gui", "src.gui.pages",
-    "src.rules", "src.learn", "src.utils",
+    "kontainy", "kontainy.core", "kontainy.core.catalog", "kontainy.gui",
+    "kontainy.gui.pages", "kontainy.gui.dialogs", "kontainy.rules",
+    "kontainy.learn", "kontainy.utils",
 ]
-py-modules = ["main"]

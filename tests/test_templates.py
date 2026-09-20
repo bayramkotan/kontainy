@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.core import templates
+from kontainy.core import templates
 
 
 def test_ids_are_unique():
