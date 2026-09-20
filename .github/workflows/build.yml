@@ -465,6 +465,17 @@ jobs:
       - name: Verify the distribution
         run: |
           python -m twine check dist/*
+
+          # PyPI has no repository context, so a relative image path renders
+          # as a broken image there while looking fine on GitHub. Caught the
+          # hard way on 0.0.2, where the logo and all six screenshots were
+          # broken on the project page.
+          if grep -nE '<img src="(assets|docs)/|!\[[^]]*\]\((assets|docs)/' README.md; then
+            echo "::error::README uses relative image paths; PyPI cannot "
+            echo "::error::resolve them. Use absolute raw.githubusercontent URLs."
+            exit 1
+          fi
+          echo "✅ README image paths are absolute"
           python - <<'PY'
           import os, sys, zipfile
           wheel = next(f for f in os.listdir("dist") if f.endswith(".whl"))

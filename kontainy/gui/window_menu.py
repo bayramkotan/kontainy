@@ -16,10 +16,7 @@ from PySide6.QtCore import QUrl
 from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import QMenu, QMessageBox
 
-from ..core.catalog import stats as catalog_stats
 from ..core.constants import APP_NAME, APP_REPO, APP_VERSION
-from ..learn.content import learn_stats
-from ..rules import rule_stats
 from ..utils.config import config, config_dir, data_dir
 from .styles import THEME_OPTIONS
 
@@ -129,8 +126,10 @@ class WindowMenuMixin:
              "LXC, LXD, Incus, systemd-nspawn, Distrobox"),
             ("\U0001f5b1", "Desktop apps", "tools-desktop", "Ctrl+8",
              "Docker Desktop, Podman Desktop, Lens, k9s, Cockpit"),
-            ("\u2699", "Settings", "settings", "Ctrl+9",
+            ("\U0001f5c2", "Config Catalog", "catalog", "Ctrl+9",
              "Every Docker and Podman configuration key"),
+            ("\u2699", "Preferences", "preferences", "Ctrl+,",
+             "kontainy's own settings: theme, fonts, language, engines"),
             ("\U0001f4da", "Learn", "learn", "Ctrl+0",
              "Containers from first principles"),
             ("\U0001f4dd", "History & Log", "log", "",
@@ -173,15 +172,7 @@ class WindowMenuMixin:
         vmm.triggered.connect(lambda: self.go("tools-vm"))
         tools_menu.addAction(vmm)
 
-        tools_menu.addSeparator()
 
-        new_container_t = QAction("\u2795 New Container\u2026", self)
-        new_container_t.triggered.connect(self._menu_new_container)
-        tools_menu.addAction(new_container_t)
-
-        from_template_t = QAction("\U0001f4e6 New from Template\u2026", self)
-        from_template_t.triggered.connect(self._menu_from_template)
-        tools_menu.addAction(from_template_t)
 
         # ── Help ──────────────────────────────────────────────────────────
         help_menu = menubar.addMenu("&Help")
@@ -269,27 +260,5 @@ class WindowMenuMixin:
         self._set_status(f"Command history exported to {path}")
 
     def _show_about(self) -> None:
-        cs = catalog_stats()
-        rs = rule_stats()
-        ls = learn_stats()
-        QMessageBox.about(
-            self, f"About {APP_NAME}",
-            f"<h2>{APP_NAME} v{APP_VERSION}</h2>"
-            "<p>Every Docker and Podman setting, in one interface.</p>"
-            "<table cellpadding='4'>"
-            f"<tr><td><b>Settings catalogue</b></td><td>{cs['total']} keys "
-            f"({cs['docker']} docker, {cs['podman']} podman, "
-            f"{cs['shared']} shared)</td></tr>"
-            f"<tr><td><b>User scope</b></td><td>{cs['user_scope']} keys "
-            "kontainy can write without elevation</td></tr>"
-            f"<tr><td><b>Gotchas</b></td><td>{cs['gotchas']} keys carry a "
-            "warning note</td></tr>"
-            f"<tr><td><b>Diagnostic rules</b></td><td>{rs['total']} "
-            f"({rs['error']} error, {rs['warning']} warning, "
-            f"{rs['info']} info)</td></tr>"
-            f"<tr><td><b>Learn</b></td><td>{ls['written']}/{ls['target']} topics "
-            f"across {ls['categories']} categories</td></tr>"
-            "</table>"
-            "<p>kontainy never elevates privileges. Root-scoped settings are "
-            "shown read-only with a copyable command.</p>"
-            f"<p><a href='{APP_REPO}'>{APP_REPO}</a></p>")
+        from .dialogs.about import AboutDialog
+        AboutDialog(self).exec()

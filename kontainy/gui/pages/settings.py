@@ -22,10 +22,18 @@ from .base import Page
 DANGER_COLORS = {0: "#a6e3a1", 1: "#f9e2af", 2: "#f38ba8"}
 
 
-class SettingsPage(Page):
-    NAME = "settings"
-    TITLE = "Settings"
-    ICON = "⚙️"
+class CatalogPage(Page):
+    """The 152 Docker and Podman configuration keys.
+
+    Renamed from "Settings" once kontainy grew its own preferences page.
+    Calling both of them Settings was the confusing part: an application
+    preference and a daemon configuration key have nothing in common except
+    the word.
+    """
+
+    NAME = "catalog"
+    TITLE = "Config Catalog"
+    ICON = "\U0001f5c2"
     SUBTITLE = ("Every configuration key Docker and Podman have. Rival tools "
                 "hide most of them; here they all sit, with what each one "
                 "does and what breaks when it is set wrong.")

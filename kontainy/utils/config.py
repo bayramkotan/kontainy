@@ -54,31 +54,63 @@ LOG_FILE = "kontainy.log"
 #  Ayarlar
 # ---------------------------------------------------------------------------
 DEFAULTS = {
-    # Tema adları src/gui/styles.py::THEME_OPTIONS ile aynıdır (13 tema).
+    # --- Appearance -------------------------------------------------------
+    # Theme names come from kontainy/gui/styles.py::THEME_OPTIONS (13 of them).
     "theme": "dark",
-    "language": "tr",
-    "start_page": "engines",
 
-    # Üç kademeli yazı tipi sistemi — VenvStudio ile aynı sözleşme, px.
+    # Three-tier font system, in px, the same contract VenvStudio uses.
     "font_family": "",
-    "font_size": 13,              # secondary — taban
+    "font_size": 13,              # secondary — the base size
     "font_primary_family": "",
-    "font_primary_size": 22,      # başlıklar
+    "font_primary_size": 22,      # headings
     "font_tertiary_family": "",
-    "font_tertiary_size": 11,     # küçük metin
-    # Eğitici gövde paletin fs_learn değerini kullanır (font_size + 5, en az
-    # 18px) ve küçültülmez — bkz. KONTAINY_TODO → BÖLÜM 1.
+    "font_tertiary_size": 11,     # small print
+    # Educational body text uses the palette's fs_learn (font_size + 5, at
+    # least 18px) and is never reduced below it.
 
-    # Pencere konumu ve boyutu kapanışta saklanır.
+    # --- Language ---------------------------------------------------------
+    "language": "en",
+
+    # --- General ----------------------------------------------------------
+    "start_page": "engines",
+    "confirm_destructive": True,
+    "show_command_strip": True,
+    "record_history": True,
+    "history_limit": 2000,
+
+    # --- Engines ----------------------------------------------------------
+    "probe_timeout": 4.0,
+    "auto_refresh_seconds": 0,    # 0 = off; irrelevant once /events lands
+    "docker_binary": "",          # empty means: find it on PATH
+    "podman_binary": "",
+    "preferred_engine": "auto",   # auto | docker | podman
+    "probe_ssh_endpoints": False,
+
+    # --- Terminal ---------------------------------------------------------
+    # Used by "Open in Terminal". Empty means auto-detect.
+    "terminal_emulator": "",
+    "terminal_arg": "-e",
+
+    # --- Catalogue --------------------------------------------------------
+    "catalog_editable_only": False,
+    "catalog_warnings_only": False,
+    "catalog_show_effective": True,
+    "catalog_confirm_dangerous": True,
+
+    # --- Diagnostics ------------------------------------------------------
+    "diagnostics_on_start": False,
+    "diagnostics_min_severity": "info",   # error | warn | info
+    "diagnostics_disabled_rules": [],
+
+    # --- Privileges -------------------------------------------------------
+    "allow_elevation": True,
+    "always_show_command": True,  # locked on; the dialog never runs unseen
+
+    # --- Window -----------------------------------------------------------
     "window_width": 1280,
     "window_height": 820,
     "window_x": None,
     "window_y": None,
-
-    "probe_timeout": 4.0,
-    "auto_refresh_seconds": 0,    # 0 = kapalı; olay akışı gelince gereksiz olacak
-    "show_command_strip": True,
-    "confirm_destructive": True,
 }
 
 

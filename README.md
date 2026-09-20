@@ -1,5 +1,8 @@
+<!-- Image paths must be absolute raw.githubusercontent URLs, not relative.
+     GitHub resolves relative paths against the repository; PyPI has no
+     repository context and renders them as broken images. -->
 <p align="center">
-  <img src="assets/icon.png" alt="kontainy" width="128" height="128">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/icon.png" alt="kontainy" width="128" height="128">
 </p>
 
 <h1 align="center">📦 kontainy</h1>
@@ -54,7 +57,7 @@ it finds, separately, and shows them all in one table with an Engine column. A
 container is never lost — you can see which engine holds it.
 
 <p align="center">
-  <img src="assets/screenshots/engines.png" alt="Engines — the resolved context chain and every reachable engine" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/engines.png" alt="Engines — the resolved context chain and every reachable engine" width="850">
 </p>
 
 The `docker` CLI resolves its target through five layers, and the top one wins:
@@ -84,7 +87,7 @@ The point is not convenience. The point is that you should be able to do the
 same thing **without kontainy** afterwards.
 
 <p align="center">
-  <img src="assets/screenshots/create_container.png" alt="Create Container — live command preview growing as options are set" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/create_container.png" alt="Create Container — live command preview growing as options are set" width="850">
 </p>
 
 This runs through the whole application:
@@ -243,7 +246,7 @@ The equivalent of a linter for your container setup. Every rule says three
 things: what was found, why it happens, and the command that fixes it.
 
 <p align="center">
-  <img src="assets/screenshots/diagnostics.png" alt="Diagnostics — findings with explanation and fix command" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/diagnostics.png" alt="Diagnostics — findings with explanation and fix command" width="850">
 </p>
 
 **19 rules**, none of which need root to detect:
@@ -495,13 +498,13 @@ $ ky --scan
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="assets/screenshots/settings.png" alt="Settings — declared value, effective value and the override chain" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/settings.png" alt="Settings — declared value, effective value and the override chain" width="850">
 </p>
 <p align="center">
-  <img src="assets/screenshots/learn.png" alt="Learn — collapsible topic cards with highlighted snippets" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/learn.png" alt="Learn — collapsible topic cards with highlighted snippets" width="850">
 </p>
 <p align="center">
-  <img src="assets/screenshots/containers.png" alt="Containers — every engine in one table" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/containers.png" alt="Containers — every engine in one table" width="850">
 </p>
 
 ---
@@ -538,7 +541,7 @@ planned; see the project roadmap.
 
 ## 📝 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/bayramkotan/kontainy/blob/main/LICENSE).
 
 <div align="center">
 

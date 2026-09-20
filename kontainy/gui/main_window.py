@@ -33,7 +33,8 @@ from .pages.diagnostics import DiagnosticsPage
 from .pages.engines import EnginesPage
 from .pages.learn import LearnPage
 from .pages.logs import LogPage
-from .pages.settings import SettingsPage
+from .pages.preferences import PreferencesPage
+from .pages.settings import CatalogPage
 from .pages.tools import (
     ContainerToolsPage, DesktopToolsPage, KubernetesToolsPage,
     SystemContainerToolsPage, VMToolsPage,
@@ -61,7 +62,8 @@ SIDEBAR = [
     (None, DesktopToolsPage),
 
     ("CONFIGURE", None),
-    (None, SettingsPage),
+    (None, CatalogPage),
+    (None, PreferencesPage),
 
     ("LEARN", None),
     (None, LearnPage),
@@ -224,6 +226,8 @@ class MainWindow(WindowMenuMixin, QMainWindow):
             self.pages["containers"].set_endpoints)
         self.pages["diagnostics"].open_setting.connect(self._open_setting)
         self.pages["learn"].open_setting.connect(self._open_setting)
+        self.pages["preferences"].theme_changed.connect(self.set_theme)
+        self.pages["preferences"].restart_needed.connect(self._set_status)
         for name, page in self.pages.items():
             if name.startswith("tools-"):
                 page.open_setting.connect(self._open_setting)
@@ -246,8 +250,8 @@ class MainWindow(WindowMenuMixin, QMainWindow):
                 return
 
     def _open_setting(self, key: str) -> None:
-        self.go("settings")
-        self.pages["settings"].focus_key(key)
+        self.go("catalog")
+        self.pages["catalog"].focus_key(key)
 
     # --- tema --------------------------------------------------------------
     def _apply_theme(self) -> None:
