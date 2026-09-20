@@ -10,7 +10,7 @@ yükseltilir — sormak da yok, beklenir.
 """
 
 APP_NAME = "kontainy"
-APP_VERSION = "0.0.1"
+APP_VERSION = "0.0.2"
 APP_TAGLINE = "Every Docker and Podman setting, in one interface"
 APP_REPO = "https://github.com/bayramkotan/kontainy"
 

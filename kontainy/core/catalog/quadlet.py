@@ -1,4 +1,4 @@
-"""kontainy — ayar kataloğu parçası. Tanımlar için base.py'ye bak."""
+"""kontainy — settings catalogue part. See base.py for the field definitions."""
 
 from .base import (
     S, SURFACE_DAEMON, SURFACE_STORAGE, SURFACE_NETWORK, SURFACE_REGISTRY,
@@ -8,51 +8,55 @@ from .base import (
 )
 
 # ===========================================================================
-#  QUADLET — systemd entegrasyonu (yalnızca Podman, tamamen kullanıcı kapsamı)
+#  QUADLET — systemd integration, Podman only, entirely in user scope
 # ===========================================================================
 QUADLET = [
     S("Container.Image", "podman", SURFACE_SYSTEMD, "podman.quadlet", "str",
-      "Imaj", "Birimin çalıştıracağı imaj.", privilege="user", docs=DOCS_QD,
+      "Image", "The image this unit runs.", privilege="user", docs=DOCS_QD,
       tags=["quadlet"]),
 
-    S("Container.PublishPort", "podman", SURFACE_SYSTEMD, "podman.quadlet", "list",
-      "Yayınlanan Portlar", "host:container biçiminde port eşlemeleri.",
+    S("Container.PublishPort", "podman", SURFACE_SYSTEMD, "podman.quadlet",
+      "list",
+      "Published ports", "Port mappings in host:container form.",
       privilege="user",
-      gotcha="Rootless'ta 1024 altı portlar varsayılan olarak bağlanamaz; "
-             "`net.ipv4.ip_unprivileged_port_start` sysctl değeri düşürülmelidir.",
-      docs=DOCS_QD, tags=["quadlet", "rootless", "ağ"]),
+      gotcha="Rootless containers cannot bind host ports below 1024 by "
+             "default; the `net.ipv4.ip_unprivileged_port_start` sysctl has "
+             "to be lowered first.",
+      docs=DOCS_QD, tags=["quadlet", "rootless", "network"]),
 
     S("Container.Volume", "podman", SURFACE_SYSTEMD, "podman.quadlet", "list",
-      "Volume'lar", "Bağlanacak volume ve bind mount'lar. `.volume` birimine "
-      "`ad.volume` ile atıf yapılabilir.",
+      "Volumes", "Volumes and bind mounts to attach. A `.volume` unit can be "
+      "referenced as `name.volume`.",
       privilege="user", docs=DOCS_QD, tags=["quadlet"]),
 
-    S("Container.AutoUpdate", "podman", SURFACE_SYSTEMD, "podman.quadlet", "choice",
-      "Otomatik Güncelleme", "`registry` seçildiğinde podman-auto-update.timer bu "
-      "container'ı yeni imaj için izler.",
+    S("Container.AutoUpdate", "podman", SURFACE_SYSTEMD, "podman.quadlet",
+      "choice",
+      "Auto-update", "With `registry`, podman-auto-update.timer watches this "
+      "container for a newer image.",
       choices=["registry", "local"], privilege="user",
-      gotcha="Timer'ın ayrıca etkinleştirilmesi gerekir: "
-             "`systemctl --user enable --now podman-auto-update.timer`.",
-      docs=DOCS_QD, tags=["quadlet", "güncelleme"]),
+      gotcha="The timer must also be enabled: "
+             "`systemctl --user enable --now podman-auto-update.timer`. "
+             "Without it the label silently does nothing.",
+      docs=DOCS_QD, tags=["quadlet", "updates"]),
 
     S("Container.UserNS", "podman", SURFACE_SYSTEMD, "podman.quadlet", "str",
-      "Kullanıcı Ad Alanı", "keep-id, auto veya açık eşleme.",
+      "User namespace", "keep-id, auto, or an explicit mapping.",
       privilege="user", docs=DOCS_QD, tags=["quadlet", "rootless"]),
 
     S("Container.Pod", "podman", SURFACE_SYSTEMD, "podman.quadlet", "str",
-      "Pod", "Bu container'ın katılacağı `.pod` birimi.",
+      "Pod", "The `.pod` unit this container joins.",
       privilege="user", docs=DOCS_QD, tags=["quadlet", "pod"]),
 
     S("Service.Restart", "podman", SURFACE_SYSTEMD, "podman.quadlet", "choice",
-      "Yeniden Başlatma", "systemd'nin servis yeniden başlatma politikası.",
+      "Restart", "systemd's restart policy for the service.",
       default="no", choices=["no", "on-failure", "always", "on-abnormal"],
       privilege="user", docs=DOCS_QD, tags=["quadlet"]),
 
     S("Install.WantedBy", "podman", SURFACE_SYSTEMD, "podman.quadlet", "str",
-      "Etkinleştirme Hedefi", "Birimin hangi hedefle başlatılacağı.",
+      "Enablement target", "Which target starts this unit.",
       default="default.target", privilege="user",
-      gotcha="Kullanıcı birimleri yalnızca kullanıcı oturum açtığında başlar. "
-             "Açılışta başlaması için `loginctl enable-linger $USER` şarttır — "
-             "rootless'ta en sık atlanan adım.",
-      docs=DOCS_QD, tags=["quadlet", "rootless", "kritik"]),
+      gotcha="User units only start once the user logs in. For the unit to "
+             "come up at boot, `loginctl enable-linger $USER` is required "
+             "\u2014 the step most often skipped in a rootless setup.",
+      docs=DOCS_QD, tags=["quadlet", "rootless", "critical"]),
 ]

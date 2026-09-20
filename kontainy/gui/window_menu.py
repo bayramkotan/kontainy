@@ -20,7 +20,7 @@ from ..core.catalog import stats as catalog_stats
 from ..core.constants import APP_NAME, APP_REPO, APP_VERSION
 from ..learn.content import learn_stats
 from ..rules import rule_stats
-from ..utils.config import config, data_dir
+from ..utils.config import config, config_dir, data_dir
 from .styles import THEME_OPTIONS
 
 
@@ -108,33 +108,57 @@ class WindowMenuMixin:
         view_menu.addAction(strip)
         self._strip_action = strip
 
-        # ── Tools ─────────────────────────────────────────────────────────
-        tools_menu = menubar.addMenu("&Tools")
+        view_menu.addSeparator()
 
-        for icon, label, page, tip in (
-            ("\u2699", "Settings Catalog", "settings",
+        # Page navigation belongs in View, not Tools. Tools is for things that
+        # act on the system; View is for what you are looking at.
+        for icon, label, page, shortcut, tip in (
+            ("\U0001f50c", "Engines", "engines", "Ctrl+1",
+             "Every socket found, and where your terminal points"),
+            ("\U0001f4e6", "Containers", "containers", "Ctrl+2",
+             "Containers from every engine, in one table"),
+            ("\u2699", "Settings", "settings", "Ctrl+3",
              "Every Docker and Podman configuration key"),
-            ("\u26a0", "Gotchas", "gotchas",
+            ("\u26a0", "Gotchas", "gotchas", "Ctrl+4",
              "Settings that burn hours when misunderstood"),
-            ("\U0001f52c", "Diagnostics", "diagnostics",
+            ("\U0001f52c", "Diagnostics", "diagnostics", "Ctrl+5",
              "Detect, explain, fix"),
-            ("\U0001f4da", "Learn", "learn",
+            ("\U0001f4da", "Learn", "learn", "Ctrl+6",
              "Containers from first principles"),
-            ("\U0001f4dd", "Command History & Log", "log",
-             "Everything kontainy has run and logged"),
+            ("\U0001f4dd", "History & Log", "log", "Ctrl+7",
+             "Every command kontainy has run"),
         ):
             action = QAction(f"{icon} {label}", self)
+            action.setShortcut(shortcut)
             action.setStatusTip(tip)
-            action.triggered.connect(lambda _=False, p=page: self.go(p))
-            tools_menu.addAction(action)
+            action.triggered.connect(lambda _=False, name=page: self.go(name))
+            view_menu.addAction(action)
 
-        tools_menu.addSeparator()
+        # ── Tools ─────────────────────────────────────────────────────────
+        tools_menu = menubar.addMenu("&Tools")
 
         open_logs = QAction("\U0001f4c1 Open Data Folder", self)
         open_logs.setStatusTip(str(data_dir()))
         open_logs.triggered.connect(
             lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(data_dir()))))
         tools_menu.addAction(open_logs)
+
+        open_config = QAction("\u2699 Open Config Folder", self)
+        open_config.setStatusTip(str(config_dir()))
+        open_config.triggered.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(config_dir()))))
+        tools_menu.addAction(open_config)
+
+        tools_menu.addSeparator()
+
+        new_container_t = QAction("\u2795 New Container\u2026", self)
+        new_container_t.triggered.connect(self._menu_new_container)
+        tools_menu.addAction(new_container_t)
+
+        from_template_t = QAction("\U0001f4e6 New from Template\u2026", self)
+        from_template_t.triggered.connect(self._menu_from_template)
+        tools_menu.addAction(from_template_t)
 
         # ── Help ──────────────────────────────────────────────────────────
         help_menu = menubar.addMenu("&Help")
@@ -230,18 +254,18 @@ class WindowMenuMixin:
             f"<h2>{APP_NAME} v{APP_VERSION}</h2>"
             "<p>Every Docker and Podman setting, in one interface.</p>"
             "<table cellpadding='4'>"
-            f"<tr><td><b>Settings catalogue</b></td><td>{cs['toplam']} keys "
+            f"<tr><td><b>Settings catalogue</b></td><td>{cs['total']} keys "
             f"({cs['docker']} docker, {cs['podman']} podman, "
-            f"{cs['ortak']} shared)</td></tr>"
-            f"<tr><td><b>User scope</b></td><td>{cs['kullanici_kapsami']} keys "
+            f"{cs['shared']} shared)</td></tr>"
+            f"<tr><td><b>User scope</b></td><td>{cs['user_scope']} keys "
             "kontainy can write without elevation</td></tr>"
-            f"<tr><td><b>Gotchas</b></td><td>{cs['tuzakli']} keys carry a "
+            f"<tr><td><b>Gotchas</b></td><td>{cs['gotchas']} keys carry a "
             "warning note</td></tr>"
-            f"<tr><td><b>Diagnostic rules</b></td><td>{rs['toplam']} "
-            f"({rs['hata']} error, {rs['uyari']} warning, "
-            f"{rs['bilgi']} info)</td></tr>"
-            f"<tr><td><b>Learn</b></td><td>{ls['yazilan']}/{ls['hedef']} topics "
-            f"across {ls['kategori']} categories</td></tr>"
+            f"<tr><td><b>Diagnostic rules</b></td><td>{rs['total']} "
+            f"({rs['error']} error, {rs['warning']} warning, "
+            f"{rs['info']} info)</td></tr>"
+            f"<tr><td><b>Learn</b></td><td>{ls['written']}/{ls['target']} topics "
+            f"across {ls['categories']} categories</td></tr>"
             "</table>"
             "<p>kontainy never elevates privileges. Root-scoped settings are "
             "shown read-only with a copyable command.</p>"

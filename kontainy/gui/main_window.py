@@ -153,9 +153,9 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         rs = rule_stats()
         ls = learn_stats()
         self.footer_label = QLabel(
-            f"      {cs['toplam']} settings<br>"
-            f"      {rs['toplam']} diagnostic rules<br>"
-            f"      {ls['yazilan']}/{ls['hedef']} Learn topics")
+            f"      {cs['total']} settings<br>"
+            f"      {rs['total']} diagnostic rules<br>"
+            f"      {ls['written']}/{ls['target']} Learn topics")
         sl.addWidget(self.footer_label)
 
         main_layout.addWidget(sidebar)
@@ -170,8 +170,8 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.busy_bar.setVisible(False)
         bar.addPermanentWidget(self.busy_bar)
         self.catalog_label = QLabel(
-            f"catalogue {cs['toplam']} · user scope "
-            f"{cs['kullanici_kapsami']} · gotchas {cs['tuzakli']}")
+            f"catalogue {cs['total']} · user scope "
+            f"{cs['user_scope']} · gotchas {cs['gotchas']}")
         bar.addPermanentWidget(self.catalog_label)
         self.setStatusBar(bar)
 

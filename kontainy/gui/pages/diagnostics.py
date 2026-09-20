@@ -57,9 +57,9 @@ class DiagnosticsPage(Page):
 
         rs = rule_stats()
         self.body.addWidget(QLabel(
-            f"Rule set: {rs['toplam']} rules "
-            f"({rs['hata']} error \u00b7 {rs['uyari']} warning \u00b7 "
-            f"{rs['bilgi']} info). None require root \u2014 detection always "
+            f"Rule set: {rs['total']} rules "
+            f"({rs['error']} error \u00b7 {rs['warning']} warning \u00b7 "
+            f"{rs['info']} info). None require root \u2014 detection always "
             f"runs with your own privileges."))
 
     def apply_theme(self) -> None:

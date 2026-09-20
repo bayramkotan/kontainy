@@ -1,20 +1,20 @@
 """
-kontainy — Kural seti
-======================
+kontainy — rule set
 
-Her kural gerçek bir belirtiye karşılık gelir. Uydurma kontrol eklenmez —
-VenvStudio'daki Code Map dersinin aynısı: **her kural bu ekosistemin
-gerçekten ürettiği bir hata sınıfına karşılık gelmeli.**
+Every rule matches a symptom that actually occurs. No invented checks: each
+corresponds to a failure this ecosystem really produces, and most of those
+failures emit no error message at all, which is exactly why detecting them
+is worth the effort.
 
-Kural kimliği önekleri:
-    CTX  context ve terminal hedefi
-    PERM izinler
-    POD  Podman / rootless
-    NET  ağ
-    DSK  disk
-    RES  kaynak sınırları
-    SVC  servis ve systemd
-    DKR  Docker Desktop / sanallaştırma
+Rule id prefixes:
+    CTX   context and terminal target
+    PERM  permissions
+    POD   Podman and rootless
+    NET   networking
+    DSK   disk
+    RES   resource limits
+    SVC   services and systemd
+    DKR   Docker Desktop and virtualisation
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from pathlib import Path
 from .engine import ERROR, INFO, WARN, Rule
 
 # ---------------------------------------------------------------------------
-#  CTX — context ve terminal hedefi
+#  CTX — context and terminal target
 # ---------------------------------------------------------------------------
 
 
@@ -71,7 +71,7 @@ def _ctx05(env):
 
 
 def _ctx06(env):
-    """Terminalin gittiği hedef erişilebilir mi?"""
+    """Is the target the terminal resolves to actually reachable?"""
     target = getattr(env.cli_target, "winner", "")
     if not target:
         return None
@@ -79,11 +79,11 @@ def _ctx06(env):
     for ep in env.endpoints:
         if ep.address.replace("unix://", "") == wanted:
             return None if ep.reachable else {"target": target, "error": ep.error}
-    return {"target": target, "error": "hiç bulunamadı"}
+    return {"target": target, "error": "not found at all"}
 
 
 # ---------------------------------------------------------------------------
-#  PERM — izinler
+#  PERM — permissions
 # ---------------------------------------------------------------------------
 def _perm01(env):
     unreachable = [e for e in env.endpoints
@@ -92,14 +92,14 @@ def _perm01(env):
         return None
     if "docker" in env.user_groups:
         return {"sockets": ", ".join(e.address for e in unreachable),
-                "note": "Kullanıcı `docker` grubunda görünüyor — grup üyeliği "
-                        "bu oturuma henüz yansımamış olabilir."}
+                "note": "The user appears to be in the `docker` group, so the "
+                        "membership may not have reached this session yet."}
     return {"sockets": ", ".join(e.address for e in unreachable),
-            "note": "Kullanıcı `docker` grubunda değil."}
+            "note": "The user is not in the `docker` group."}
 
 
 # ---------------------------------------------------------------------------
-#  POD — Podman ve rootless
+#  POD — Podman and rootless
 # ---------------------------------------------------------------------------
 def _pod01(env):
     if not env.podman_binary:
@@ -133,17 +133,17 @@ def _pod03(env):
 
 
 def _pod04(env):
-    """Rootless Podman var ama auto-update timer kapalı — sadece bilgi."""
+    """Rootless Podman is present but the auto-update timer is off."""
     if not env.podman_binary:
         return None
     state = env.units.get(("podman-auto-update.timer", "user"), "")
     if state == "active":
         return None
-    return {"state": state or "bulunamadı"}
+    return {"state": state or "not found"}
 
 
 # ---------------------------------------------------------------------------
-#  NET — ağ
+#  NET — networking
 # ---------------------------------------------------------------------------
 def _docker_pools(env) -> list:
     pools = []
@@ -190,7 +190,7 @@ def _net02(env):
 
 
 def _net03(env):
-    """Arch/CachyOS'ta nftables var, iptables-nft köprüsü yok."""
+    """nftables without the iptables-nft bridge, common on Arch."""
     if not shutil.which("nft"):
         return None
     if shutil.which("iptables"):
@@ -225,10 +225,10 @@ def _dsk02(env):
 
 
 # ---------------------------------------------------------------------------
-#  RES — kaynak sınırları
+#  RES — resource limits
 # ---------------------------------------------------------------------------
 def _res01(env):
-    """cgroup v2 + rootless + cgroupfs = sınırlar sessizce yok sayılır."""
+    """cgroup v2 plus rootless plus cgroupfs: limits are silently ignored."""
     if not Path("/sys/fs/cgroup/cgroup.controllers").exists():
         return None
     rootless = [e for e in env.endpoints
@@ -246,7 +246,7 @@ def _res01(env):
 
 
 # ---------------------------------------------------------------------------
-#  SVC — servis ve systemd
+#  SVC — services and systemd
 # ---------------------------------------------------------------------------
 def _svc01(env):
     sock = env.units.get(("docker.socket", "system"), "")
@@ -257,7 +257,7 @@ def _svc01(env):
 
 
 # ---------------------------------------------------------------------------
-#  DKR — Docker Desktop ve sanallaştırma
+#  DKR — Docker Desktop and virtualisation
 # ---------------------------------------------------------------------------
 def _dkr01(env):
     desktop = [e for e in env.endpoints if "desktop" in e.address]
@@ -266,62 +266,64 @@ def _dkr01(env):
     if env.kvm_present and env.kvm_readable:
         return None
     if not env.kvm_present:
-        return {"reason": "/dev/kvm yok — sanallaştırma BIOS'ta kapalı olabilir"}
-    return {"reason": "/dev/kvm var ama okunamıyor — kullanıcı `kvm` grubunda değil"}
+        return {"reason": "/dev/kvm is missing \u2014 virtualisation may be "
+                          "disabled in the BIOS"}
+    return {"reason": "/dev/kvm exists but is not readable \u2014 the user "
+                      "is not in the `kvm` group"}
 
 
 # ---------------------------------------------------------------------------
-#  Kural tablosu
+#  Rule table
 # ---------------------------------------------------------------------------
 RULES = [
     Rule(
         id="CTX01", severity=ERROR,
-        title="DOCKER_HOST context'i eziyor",
+        title="DOCKER_HOST is overriding your context",
         detect=_ctx01,
         explain=(
-            "`DOCKER_HOST` ortam değişkeni `{host}` olarak ayarlı. Bu değişken "
-            "varken `~/.docker/config.json` içindeki context (`{context}`) "
-            "TAMAMEN yok sayılır.\n\n"
-            "Sonuç: `docker context use` komutu \"başarılı\" der ve hiçbir şey "
-            "değişmez. Bu, \"container'larım kayboldu\" şikayetinin bir numaralı "
-            "sebebidir.\n\n"
-            "Değişkenin nereden geldiğini bulmak için kabuk başlangıç "
-            "dosyalarına bakın: ~/.bashrc, ~/.zshrc, ~/.profile, "
+            "The `DOCKER_HOST` environment variable is set to `{host}`. "
+            "While it is set, the context in `~/.docker/config.json` "
+            "(`{context}`) is ignored COMPLETELY.\n\n"
+            "The consequence: `docker context use` reports success and "
+            "changes nothing. This is the number one cause of the "
+            "complaint that containers have disappeared.\n\n"
+            "To find where the variable comes from, check your shell "
+            "startup files: ~/.bashrc, ~/.zshrc, ~/.profile, "
             "~/.config/environment.d/*.conf"),
         fix_command="unset DOCKER_HOST",
         fix_scope="user",
         setting_key="currentContext",
         learn_topic="troubleshooting/context-chain",
-        tags=["context", "kritik"],
+        tags=["context", "critical"],
     ),
     Rule(
         id="CTX02", severity=INFO,
-        title="Aynı anda birden çok Docker motoru çalışıyor",
+        title="More than one Docker engine is running",
         detect=_ctx02,
         explain=(
-            "{count} ayrı Docker motoru erişilebilir durumda ve sürümleri "
-            "farklı: {versions}.\n\n"
-            "Bu bir hata değil — ama CLI aynı anda yalnızca birine bakar. "
-            "Bir container'ı terminalde göremiyorsanız muhtemelen öteki "
-            "motordadır. kontainy hepsini Container'lar sayfasında Motor "
-            "sütunuyla birlikte gösterir."),
+            "{count} separate Docker engines are reachable and their "
+            "versions differ: {versions}.\n\n"
+            "This is not an error, but the CLI only ever looks at one of "
+            "them. If a container is missing from your terminal it is "
+            "probably on the other engine. kontainy shows them all on the "
+            "Containers page, with an Engine column."),
         fix_scope="none",
         learn_topic="troubleshooting/multiple-engines",
         tags=["context"],
     ),
     Rule(
         id="CTX03", severity=ERROR,
-        title="Kimlik yardımcısı eksik: docker-credential-{store}",
+        title="Credential helper missing: docker-credential-{store}",
         detect=_ctx03,
         explain=(
-            "`~/.docker/config.json` içinde `credsStore: \"{store}\"` yazıyor "
-            "ama `docker-credential-{store}` programı PATH'te yok.\n\n"
-            "Bu genellikle Docker Desktop kaldırıldığında olur: ayar geride "
-            "kalır ve her `docker` komutu "
-            "`docker-credential-{store} not found in $PATH` hatası verir.\n\n"
-            "Çözüm anahtarı silmektir; kayıtlı registry parolaları "
-            "`~/.docker/config.json` içinde düz metne döner, tekrar "
-            "`docker login` yapmanız gerekebilir."),
+            "`~/.docker/config.json` declares `credsStore: {store}`, but "
+            "`docker-credential-{store}` is not on PATH.\n\n"
+            "This usually happens after Docker Desktop is removed: the "
+            "setting is left behind and every `docker` command fails with "
+            "`docker-credential-{store} not found in $PATH`.\n\n"
+            "The fix is to remove the key. Stored registry passwords then "
+            "fall back to plain text in `~/.docker/config.json`, so you may "
+            "need to run `docker login` again."),
         fix_command=(
             "python -c \"import json,pathlib;"
             "p=pathlib.Path.home()/'.docker/config.json';"
@@ -330,19 +332,21 @@ RULES = [
         fix_scope="user",
         setting_key="credsStore",
         learn_topic="migration/desktop-leftovers",
-        tags=["desktop", "kritik"],
+        tags=["desktop", "critical"],
     ),
     Rule(
         id="CTX04", severity=WARN,
-        title="CLI eklentileri gölgeleniyor",
+        title="CLI plugins are being shadowed",
         detect=_ctx04,
         explain=(
-            "Şu eklentiler hem `~/.docker/cli-plugins` hem sistem dizininde "
-            "var: {plugins}.\n\n"
-            "Kullanıcı dizini önce gelir, yani distro paketinin sürümü "
-            "gölgelenir. `docker compose version` ile `docker-compose version` "
-            "farklı çıkabilir ve hangisinin çalıştığı belirsizleşir.\n\n"
-            "Docker Desktop kurulumu bu dizini kendi eklentileriyle doldurur."),
+            "These plugins exist in both `~/.docker/cli-plugins` and a "
+            "system directory: {plugins}.\n\n"
+            "The user directory takes precedence, so the distribution's "
+            "version is shadowed. `docker compose version` and "
+            "`docker-compose version` can report different versions, and "
+            "which one actually runs becomes unclear.\n\n"
+            "A Docker Desktop install fills this directory with its own "
+            "plugins."),
         fix_command="ls -l ~/.docker/cli-plugins /usr/lib/docker/cli-plugins",
         fix_scope="user",
         setting_key="cliPluginsExtraDirs",
@@ -351,58 +355,60 @@ RULES = [
     ),
     Rule(
         id="CTX05", severity=INFO,
-        title="`docker` komutu aslında Podman'a gidiyor",
+        title="The `docker` command actually goes to Podman",
         detect=_ctx05,
         explain=(
-            "`{link}` → `{target}`. Sisteme `podman-docker` paketi kurulu ve "
-            "`docker` komutu Podman'ın uyumluluk sarmalayıcısı.\n\n"
-            "Bu bir hata değil, ama bilinmezse saatler yakar: `docker run` "
-            "çalışır, `docker ps` boş döner (Podman'ın kendi deposuna bakar), "
-            "ve Docker'a özel bazı bayraklar sessizce farklı davranır."),
+            "`{link}` points to `{target}`. The `podman-docker` package is "
+            "installed and `docker` is Podman's compatibility wrapper.\n\n"
+            "This is not an error, but it burns hours when you do not know "
+            "about it: `docker run` works, `docker ps` comes back empty "
+            "because it looks at Podman's own store, and a few "
+            "Docker-specific flags behave differently without saying so."),
         fix_scope="none",
         learn_topic="migration/podman-docker-shim",
-        tags=["podman", "uyumluluk"],
+        tags=["podman", "compatibility"],
     ),
     Rule(
         id="CTX06", severity=ERROR,
-        title="Terminalin gittiği hedefe ulaşılamıyor",
+        title="The target your terminal points at is unreachable",
         detect=_ctx06,
         explain=(
-            "`docker` komutu `{target}` adresine gidiyor ama oraya "
-            "bağlanılamıyor: {error}\n\n"
-            "Terminalde çalıştıracağınız her `docker` komutu bu hatayı "
-            "verecek. kontainy diğer motorları göstermeye devam eder."),
+            "The `docker` command goes to `{target}`, but that address "
+            "cannot be reached: {error}\n\n"
+            "Every `docker` command you run in a terminal will fail with "
+            "this. kontainy carries on showing the other engines."),
         fix_command="docker context ls",
         fix_scope="user",
         learn_topic="troubleshooting/context-chain",
-        tags=["context", "kritik"],
+        tags=["context", "critical"],
     ),
 
     Rule(
         id="PERM01", severity=ERROR,
-        title="Sokete erişim reddedildi",
+        title="Permission denied on a socket",
         detect=_perm01,
         explain=(
-            "Şu soket(ler)e izin hatasıyla bağlanılamadı: {sockets}\n\n{note}\n\n"
-            "Gruba eklendikten sonra **yeniden giriş yapılması** gerekir; "
-            "`newgrp docker` yalnızca o kabuk için geçerlidir ve GUI "
-            "uygulamaları etkilenmez."),
-        fix_command="sudo usermod -aG docker $USER   # sonra oturumu kapatıp açın",
+            "Could not connect to these sockets because of a permission "
+            "error: {sockets}\n\n{note}\n\n"
+            "After being added to the group you must log out and back in. "
+            "`newgrp docker` affects only that one shell and does not reach "
+            "GUI applications."),
+        fix_command="sudo usermod -aG docker $USER   # then log out and back in",
         fix_scope="root",
         learn_topic="troubleshooting/permissions",
-        tags=["izin", "kritik"],
+        tags=["permissions", "critical"],
     ),
 
     Rule(
         id="POD01", severity=WARN,
-        title="Podman kurulu ama soketi çalışmıyor",
+        title="Podman is installed but its socket is not running",
         detect=_pod01,
         explain=(
-            "`podman` kurulu fakat API soketi bulunamadı "
-            "(`podman.socket` --user durumu: {state}).\n\n"
-            "Soket olmadan kontainy Podman container'larını API üzerinden "
-            "listeleyemez. Soket systemd tarafından talep üzerine başlatılır; "
-            "kalıcı olması için etkinleştirilmelidir."),
+            "`podman` is installed but no API socket was found "
+            "(`podman.socket` --user state: {state}).\n\n"
+            "Without the socket kontainy cannot list Podman containers over "
+            "the API. systemd starts the socket on demand; enabling it "
+            "makes that persist across reboots."),
         fix_command="systemctl --user enable --now podman.socket",
         fix_scope="user",
         learn_topic="systemd/socket-activation",
@@ -410,49 +416,51 @@ RULES = [
     ),
     Rule(
         id="POD02", severity=WARN,
-        title="Linger kapalı — rootless container'lar çıkışta ölecek",
+        title="Linger is off, so rootless containers die at logout",
         detect=_pod02,
         explain=(
-            "`{user}` kullanıcısı için linger kapalı. Kullanıcı systemd "
-            "birimleri yalnızca oturum açıkken çalışır; oturumu kapattığınızda "
-            "veya SSH bağlantısı düştüğünde **rootless container'lar durur** ve "
-            "makine yeniden başladığında geri gelmez.\n\n"
-            "Quadlet birimlerinin ve `--restart=always` beklentisinin çalışması "
-            "için bu şarttır — rootless kurulumlarda en sık atlanan adım."),
+            "Linger is disabled for `{user}`. User systemd units run only "
+            "while a session is open, so when you log out or an SSH "
+            "connection drops, rootless containers stop \u2014 and they do "
+            "not come back after a reboot.\n\n"
+            "This is required for Quadlet units and for `--restart=always` "
+            "to mean anything. It is the most commonly skipped step in a "
+            "rootless setup."),
         fix_command="loginctl enable-linger $USER",
         fix_scope="user",
         setting_key="Install.WantedBy",
         learn_topic="systemd/linger",
-        tags=["podman", "rootless", "systemd", "kritik"],
+        tags=["podman", "rootless", "systemd", "critical"],
     ),
     Rule(
         id="POD03", severity=ERROR,
-        title="subuid/subgid kaydı yok — rootless Podman çalışmaz",
+        title="No subuid/subgid range, so rootless Podman cannot work",
         detect=_pod03,
         explain=(
-            "`{user}` kullanıcısı için {files} dosyasında kayıt bulunamadı.\n\n"
-            "Rootless Podman container içindeki kullanıcıları host'ta bir UID "
-            "aralığına eşler; bu aralık olmadan imaj çekilemez ve container "
-            "başlatılamaz. Tipik belirti: "
-            "`potentially insufficient UIDs or GIDs available in user namespace`.\n\n"
-            "⚠️ Kayıt eklendikten sonra `podman system migrate` çalıştırılmalıdır, "
-            "yoksa mevcut container'lar eski eşlemeyle kalır."),
+            "No entry for `{user}` was found in {files}.\n\n"
+            "Rootless Podman maps users inside the container onto a range "
+            "of UIDs on the host. Without that range no image can be pulled "
+            "and no container can start. The typical symptom is "
+            "`potentially insufficient UIDs or GIDs available in user "
+            "namespace`.\n\n"
+            "After adding the entry you must run `podman system migrate`, "
+            "or existing containers keep the old mapping."),
         fix_command=(
             "sudo usermod --add-subuids 100000-165535 "
             "--add-subgids 100000-165535 $USER && podman system migrate"),
         fix_scope="root",
         learn_topic="podman/rootless-subuid",
-        tags=["podman", "rootless", "kritik"],
+        tags=["podman", "rootless", "critical"],
     ),
     Rule(
         id="POD04", severity=INFO,
-        title="Otomatik güncelleme zamanlayıcısı kapalı",
+        title="Auto-update timer is inactive",
         detect=_pod04,
         explain=(
-            "`podman-auto-update.timer` durumu: {state}.\n\n"
-            "Bir container'a `AutoUpdate=registry` etiketi koymak tek başına "
-            "yetmez; güncellemeyi yapan bu zamanlayıcıdır. Kapalıyken etiket "
-            "sessizce hiçbir şey yapmaz."),
+            "`podman-auto-update.timer` state: {state}.\n\n"
+            "Labelling a container `AutoUpdate=registry` is not enough on "
+            "its own; this timer is what performs the update. While it is "
+            "off the label silently does nothing."),
         fix_command="systemctl --user enable --now podman-auto-update.timer",
         fix_scope="user",
         setting_key="Container.AutoUpdate",
@@ -462,81 +470,86 @@ RULES = [
 
     Rule(
         id="NET01", severity=ERROR,
-        title="Docker adres havuzu yerel ağla çakışıyor",
+        title="Docker's address pool clashes with your local network",
         detect=_net01,
         explain=(
-            "Docker'ın kullandığı IP bloğuyla aynı /16 önekine sahip bir yerel "
-            "rota var: {routes}\n\n"
-            "Bu, Docker kurulduğunda kurumsal ağın veya VPN'in tamamen "
-            "erişilemez olmasının klasik sebebidir. Çözüm Docker'ı "
-            "kullanılmayan bir bloğa taşımaktır (örneğin 10.200.0.0/16).\n\n"
-            "⚠️ `default-address-pools` yalnızca YENİ ağları etkiler; "
-            "`docker0` köprüsünün kendisi için `bip` anahtarı gerekir."),
+            "A local route shares the same /16 prefix as the IP block "
+            "Docker uses: {routes}\n\n"
+            "This is the classic reason a corporate network or VPN becomes "
+            "unreachable the moment Docker is installed. The fix is to move "
+            "Docker to an unused block, for example 10.200.0.0/16.\n\n"
+            "Note that `default-address-pools` only affects NEW networks; "
+            "the `docker0` bridge itself needs the `bip` key."),
         fix_command="sudo $EDITOR /etc/docker/daemon.json   # default-address-pools",
         fix_scope="root",
         setting_key="default-address-pools",
         learn_topic="network/subnet-clash",
-        tags=["ağ", "vpn", "kritik"],
+        tags=["network", "vpn", "critical"],
     ),
     Rule(
         id="NET02", severity=INFO,
-        title="Rootless'ta 1024 altı portlar bağlanamaz",
+        title="Rootless containers cannot bind ports below 1024",
         detect=_net02,
         explain=(
-            "`net.ipv4.ip_unprivileged_port_start` = {value}. Rootless "
-            "container'lar bu değerin altındaki portlara bağlanamaz — "
-            "80 ve 443 dahil.\n\n"
-            "Bir web sunucusunu rootless çalıştırmak istiyorsanız ya yüksek "
-            "port kullanın (8080) ya da bu sysctl değerini düşürün. "
-            "Kalıcı yapmak için /etc/sysctl.d/ altına bir dosya gerekir."),
+            "`net.ipv4.ip_unprivileged_port_start` is {value}. Rootless "
+            "containers cannot bind host ports below that value, which "
+            "includes 80 and 443.\n\n"
+            "To run a web server rootless, either publish on a high port "
+            "such as 8080 or lower this sysctl. Making it permanent needs a "
+            "file under /etc/sysctl.d/."),
         fix_command="sudo sysctl net.ipv4.ip_unprivileged_port_start=80",
         fix_scope="root",
         setting_key="Container.PublishPort",
         learn_topic="network/rootless-ports",
-        tags=["podman", "rootless", "ağ"],
+        tags=["podman", "rootless", "network"],
     ),
     Rule(
         id="NET03", severity=WARN,
-        title="nftables var, iptables uyumluluk katmanı yok",
+        title="nftables is present with no iptables compatibility layer",
         detect=_net03,
         explain=(
-            "Sistemde `nft` var ama `iptables` komutu bulunamadı. Docker ve "
-            "netavark port yayınlama kurallarını iptables arayüzü üzerinden "
-            "yazar; bu katman yoksa **port yayınlama sessizce çalışmaz** — "
-            "container ayağa kalkar, porta erişilemez.\n\n"
-            "Arch/CachyOS'ta `iptables-nft` paketi bu köprüyü sağlar."),
+            "`nft` exists on this system but the `iptables` command was not "
+            "found. Docker and netavark write port-publishing rules through "
+            "the iptables interface; without that layer, publishing a port "
+            "silently does nothing \u2014 the container starts and the port "
+            "is unreachable.\n\n"
+            "On Arch and CachyOS the `iptables-nft` package provides the "
+            "bridge."),
         fix_command="sudo pacman -S iptables-nft",
         fix_scope="root",
         setting_key="network.firewall_driver",
         learn_topic="network/firewall-backends",
-        tags=["ağ", "arch", "güvenlik duvarı"],
+        tags=["network", "arch", "firewall"],
     ),
 
     Rule(
         id="DSK01", severity=WARN,
-        title="Docker logları sınırsız büyüyor",
+        title="Docker logs are growing without limit",
         detect=_dsk01,
         explain=(
-            "`{path}` içinde log döndürme ayarlanmamış. `json-file` sürücüsü "
-            "varsayılan olarak SINIRSIZDIR: uzun çalışan bir container'ın log "
-            "dosyası gigabaytlara çıkıp kök diski doldurur.\n\n"
-            "Bu, Docker kaynaklı disk dolmasının bir numaralı sebebidir. "
-            "Önerilen başlangıç: `max-size: 10m`, `max-file: 3`."),
+            "No log rotation is configured in `{path}`. The `json-file` "
+            "driver is UNLIMITED by default: a long-running container's log "
+            "file grows into gigabytes and fills the root disk.\n\n"
+            "This is the number one cause of Docker-related disk "
+            "exhaustion. A reasonable starting point is `max-size: 10m` "
+            "with `max-file: 3`."),
         fix_command="sudo $EDITOR /etc/docker/daemon.json   # log-opts.max-size",
         fix_scope="root",
         setting_key="log-opts.max-size",
         learn_topic="storage/log-rotation",
-        tags=["disk", "log", "kritik"],
+        tags=["disk", "logging", "critical"],
     ),
     Rule(
         id="DSK02", severity=INFO,
-        title="BuildKit önbelleği sınırsız",
+        title="BuildKit cache is unbounded",
         detect=_dsk02,
         explain=(
-            "`builder.gc` yapılandırılmamış. Sık build yapılan makinelerde "
-            "build önbelleği imajlardan daha çok yer kaplayabilir.\n\n"
-            "⚠️ `docker image prune` bu önbelleği SİLMEZ — `docker system df` "
-            "çıktısında ayrı bir satırdır ve `docker builder prune` gerekir."),
+            "`builder.gc` is not configured. On machines that build often, "
+            "the build cache can take more space than the images "
+            "themselves.\n\n"
+            "`docker image prune` does NOT remove it \u2014 it is a "
+            "separate line in `docker system df` and needs "
+            "`docker builder prune`."),
         fix_command="docker system df && docker builder prune",
         fix_scope="user",
         setting_key="builder.gc.defaultKeepStorage",
@@ -546,32 +559,32 @@ RULES = [
 
     Rule(
         id="RES01", severity=WARN,
-        title="cgroupfs seçili — kaynak sınırları sessizce uygulanmayabilir",
+        title="cgroupfs is selected, so resource limits may be ignored",
         detect=_res01,
         explain=(
-            "`{path}` içinde `cgroupfs` geçiyor ve sistem cgroup v2 kullanıyor.\n\n"
-            "Rootless + cgroup v2 birleşiminde `--memory`, `--cpus` ve "
-            "`--pids-limit` gibi sınırların uygulanabilmesi için "
-            "`cgroup_manager = \"systemd\"` gerekir. cgroupfs ile sınırlar "
-            "**hata vermeden yok sayılır** — sınır koyduğunuzu sanırsınız, "
-            "container tüm makineyi kullanır."),
+            "`cgroupfs` appears in `{path}` and this system uses cgroup "
+            "v2.\n\n"
+            "On rootless cgroup v2, limits such as `--memory`, `--cpus` and "
+            "`--pids-limit` require `cgroup_manager = systemd`. With "
+            "cgroupfs they are ignored without an error \u2014 you believe "
+            "a limit is in place while the container uses the whole "
+            "machine."),
         fix_command="podman info --format '{{.Host.CgroupManager}}'",
         fix_scope="user",
         setting_key="containers.cgroup_manager",
         learn_topic="troubleshooting/silent-limits",
-        tags=["cgroup", "rootless", "kritik"],
+        tags=["cgroup", "rootless", "critical"],
     ),
 
     Rule(
         id="SVC01", severity=INFO,
-        title="docker.socket açık — servisi durdurmak yetmez",
+        title="docker.socket is active, so stopping the service is not enough",
         detect=_svc01,
         explain=(
-            "Hem `docker.service` hem `docker.socket` etkin. Socket activation "
-            "açıkken `systemctl stop docker.service` komutundan sonra ilk "
-            "`docker` komutu daemon'ı **yeniden başlatır**.\n\n"
-            "Daemon'ı gerçekten durdurmak için ikisinin birden durdurulması "
-            "gerekir."),
+            "Both `docker.service` and `docker.socket` are enabled. With "
+            "socket activation on, the first `docker` command after "
+            "`systemctl stop docker.service` starts the daemon again.\n\n"
+            "To actually stop the daemon, both have to be stopped."),
         fix_command="sudo systemctl stop docker.socket docker.service",
         fix_scope="root",
         learn_topic="systemd/socket-activation",
@@ -580,13 +593,13 @@ RULES = [
 
     Rule(
         id="DKR01", severity=ERROR,
-        title="Docker Desktop için sanallaştırma hazır değil",
+        title="Virtualisation is not ready for Docker Desktop",
         detect=_dkr01,
         explain=(
-            "Docker Desktop soketi bulundu ama {reason}.\n\n"
-            "Docker Desktop for Linux bir sanal makine içinde çalışır ve "
-            "KVM'e erişemezse hiç açılmaz."),
-        fix_command="sudo usermod -aG kvm $USER   # sonra oturumu kapatıp açın",
+            "A Docker Desktop socket was found, but {reason}.\n\n"
+            "Docker Desktop for Linux runs inside a virtual machine and "
+            "will not start at all if it cannot reach KVM."),
+        fix_command="sudo usermod -aG kvm $USER   # then log out and back in",
         fix_scope="root",
         learn_topic="kvm/basics",
         tags=["desktop", "kvm"],
@@ -604,8 +617,8 @@ def rule_by_id(rule_id: str):
 def rule_stats() -> dict:
     from .engine import ERROR as E, INFO as I, WARN as W
     return {
-        "toplam": len(RULES),
-        "hata": len([r for r in RULES if r.severity == E]),
-        "uyari": len([r for r in RULES if r.severity == W]),
-        "bilgi": len([r for r in RULES if r.severity == I]),
+        "total": len(RULES),
+        "error": len([r for r in RULES if r.severity == E]),
+        "warning": len([r for r in RULES if r.severity == W]),
+        "info": len([r for r in RULES if r.severity == I]),
     }

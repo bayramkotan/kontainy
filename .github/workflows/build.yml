@@ -80,6 +80,26 @@ jobs:
           path: dist/kontainy
           if-no-files-found: warn
 
+  build-macos:
+    needs: [tests]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6 pyinstaller Pillow
+      - name: Build
+        run: python build.py
+      - uses: actions/upload-artifact@v5
+        with:
+          name: kontainy-macOS
+          path: dist/kontainy
+          if-no-files-found: warn
+
   build-linux-appimage:
     needs: [tests]
     runs-on: ubuntu-22.04
@@ -271,7 +291,7 @@ jobs:
           if-no-files-found: warn
 
   release:
-    needs: [build-windows, build-macos-arm, build-linux-appimage]
+    needs: [build-windows, build-macos-arm, build-macos, build-linux-appimage]
     runs-on: ubuntu-latest
     if: always() && startsWith(github.ref, 'refs/tags/v') && needs.build-linux-appimage.result == 'success'
 
@@ -330,13 +350,16 @@ jobs:
         run: |
           ls -laR
           mv kontainy-macOS-arm64/kontainy kontainy-macOS-arm64/kontainy-macOS-arm64 2>/dev/null || true
+          mv kontainy-macOS/kontainy kontainy-macOS/kontainy-macOS-x86_64 2>/dev/null || true
 
           WIN_SIZE=$(du -sh kontainy-Windows/kontainy.exe 2>/dev/null | cut -f1 || echo "—")
           MAC_SIZE=$(du -sh kontainy-macOS-arm64/kontainy-macOS-arm64 2>/dev/null | cut -f1 || echo "—")
+          MACX_SIZE=$(du -sh kontainy-macOS/kontainy-macOS-x86_64 2>/dev/null | cut -f1 || echo "—")
           LNX_SIZE=$(du -sh kontainy-Linux-AppImage/kontainy*.AppImage 2>/dev/null | cut -f1 || echo "—")
 
           echo "win_size=$WIN_SIZE" >> $GITHUB_OUTPUT
           echo "mac_size=$MAC_SIZE" >> $GITHUB_OUTPUT
+          echo "macx_size=$MACX_SIZE" >> $GITHUB_OUTPUT
           echo "lnx_size=$LNX_SIZE" >> $GITHUB_OUTPUT
 
       - name: Create Release
@@ -346,6 +369,7 @@ jobs:
             kontainy-Windows/kontainy.exe
             kontainy-Linux-AppImage/kontainy*.AppImage
             kontainy-macOS-arm64/kontainy-macOS-arm64
+            kontainy-macOS/kontainy-macOS-x86_64
           body: |
             <div align="center">
 
@@ -373,7 +397,8 @@ jobs:
             |:--------:|:-----|:----:|:------|
             | 🐧 **Linux** x64 | `kontainy-x86_64.AppImage` | ${{ steps.sizes.outputs.lnx_size }} | `chmod +x` then run — the fully supported target |
             | 🪟 **Windows** x64 | `kontainy.exe` | ${{ steps.sizes.outputs.win_size }} | Docker Desktop and `podman machine` only; rootless, Quadlet and systemd checks do not apply |
-            | 🍎 **macOS** ARM64 | `kontainy-macOS-arm64` | ${{ steps.sizes.outputs.mac_size }} | Same caveats as Windows |
+            | 🍎 **macOS** ARM64 | `kontainy-macOS-arm64` | ${{ steps.sizes.outputs.mac_size }} | Apple Silicon. Same caveats as Windows |
+            | 🍎 **macOS** Intel | `kontainy-macOS-x86_64` | ${{ steps.sizes.outputs.macx_size }} | Intel Macs. Same caveats as Windows |
             | 📦 **PyPI** | `pip install kontainy` | — | `pip install --upgrade kontainy` |
 
             ---

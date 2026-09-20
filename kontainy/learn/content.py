@@ -488,10 +488,10 @@ def learn_stats() -> dict:
     written = sum(len(c["topics"]) for c in LEARN_CATEGORIES)
     target = sum(c["target"] for c in LEARN_CATEGORIES)
     return {
-        "kategori": len(LEARN_CATEGORIES),
-        "yazilan": written,
-        "hedef": target,
-        "yuzde": round(100 * written / target) if target else 0,
+        "categories": len(LEARN_CATEGORIES),
+        "written": written,
+        "target": target,
+        "percent": round(100 * written / target) if target else 0,
     }
 
 

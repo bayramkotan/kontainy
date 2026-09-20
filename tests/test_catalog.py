@@ -46,5 +46,5 @@ def test_search_finds_known_keys():
 
 def test_stats_are_consistent():
     stats = catalog.stats()
-    assert stats["toplam"] == len(catalog.ALL_SETTINGS)
-    assert stats["docker"] + stats["podman"] + stats["ortak"] == stats["toplam"]
+    assert stats["total"] == len(catalog.ALL_SETTINGS)
+    assert stats["docker"] + stats["podman"] + stats["shared"] == stats["total"]

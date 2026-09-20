@@ -428,8 +428,8 @@ class LearnPage(Page):
         self.add_tool_button("Search", self._search, kind="primary")
         st = learn_stats()
         self.progress = QLabel(
-            f"{st['kategori']} categories \u00b7 "
-            f"{st['yazilan']}/{st['hedef']} topics")
+            f"{st['categories']} categories \u00b7 "
+            f"{st['written']}/{st['target']} topics")
         self.toolbar.addWidget(self.progress)
 
         main = QHBoxLayout()

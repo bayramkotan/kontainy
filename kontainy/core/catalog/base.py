@@ -1,48 +1,45 @@
 """
-kontainy — Ayar Kataloğu
-==============================
+kontainy — settings catalogue: definitions
 
-Bu dosya kontainy'in KALBİDİR. Docker ve Podman'ın tüm yapılandırma
-yüzeyi burada yapısal veri olarak tanımlanır. GUI bu katalogtan üretilir;
-hiçbir ayar arayüze elle gömülmez.
+This file is the heart of the project. The whole configuration surface of
+Docker and Podman lives here as structured data; the interface is GENERATED
+from it, and no setting is ever hard-coded into the GUI.
 
-VenvStudio'daki CONFLICT_RULES ile aynı rolü oynar: tek kaynak, GUI onu okur.
-
-Alanlar
--------
-key              : Yapılandırma dosyasındaki gerçek anahtar (noktalı yol)
-engine           : "docker" | "podman" | "both"
-surface          : Ayarın yaşadığı yüzey (SURFACE_* sabitleri)
-file             : Ayarın yazıldığı dosya (scope'a göre çözülür)
-vtype            : bool | int | str | choice | list | dict | size | duration
-choices          : vtype == "choice" ise geçerli değerler
-default          : Üreticinin varsayılanı (None = tanımsız/dinamik)
-cli              : Eşdeğer CLI bayrağı (öğretici panelde gösterilir)
-restart          : Değişiklik sonrası yeniden başlatma gerekir mi
-privilege        : "user" | "root" — root olanlar salt-okunur + komut gösterilir
-danger           : 0 güvenli, 1 dikkat, 2 tehlikeli (izolasyonu zayıflatır)
-title            : Kısa başlık (TR)
-desc             : Ne işe yarar, ne zaman değiştirilir (TR)
-gotcha           : Bilinmediğinde saat yakan ayrıntı (TR) — None olabilir
-docs             : Resmî dokümantasyon bağlantısı
+Fields
+------
+key              the real key in the configuration file, as a dotted path
+engine           "docker" | "podman" | "both"
+surface          which surface the setting belongs to (SURFACE_* constants)
+file             the file it is written to, resolved per scope
+vtype            bool | int | str | choice | list | dict | size | duration
+choices          valid values when vtype == "choice"
+default          the vendor default; None means undefined or dynamic
+cli              the equivalent CLI flag, shown in the educational panel
+restart          whether a restart is required after changing it
+privilege        "user" | "root" — root entries are read-only with a command
+danger           0 safe, 1 careful, 2 dangerous (weakens isolation)
+title            short title
+desc             what it does and when you would change it
+gotcha           the detail that burns hours when it is not known; may be None
+docs             link to the official documentation
 """
 
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-# --- Yüzeyler ---------------------------------------------------------------
+# --- Surfaces ---------------------------------------------------------------
 SURFACE_DAEMON = "daemon"        # daemon.json / containers.conf [engine]
 SURFACE_STORAGE = "storage"      # storage-driver / storage.conf
-SURFACE_NETWORK = "network"      # ağ yapılandırması
+SURFACE_NETWORK = "network"      # network configuration
 SURFACE_REGISTRY = "registry"    # registries.conf / registry-mirrors
-SURFACE_CONTAINER = "container"  # container başına çalıştırma bayrakları
+SURFACE_CONTAINER = "container"  # per-container run flags
 SURFACE_SECURITY = "security"    # capabilities, seccomp, userns
-SURFACE_RESOURCE = "resource"    # cgroup limitleri
-SURFACE_LOGGING = "logging"      # log sürücüsü ve rotasyon
+SURFACE_RESOURCE = "resource"    # cgroup limits
+SURFACE_LOGGING = "logging"      # log driver and rotation
 SURFACE_BUILD = "build"          # BuildKit / buildah
-SURFACE_SYSTEMD = "systemd"      # Quadlet / servis entegrasyonu
+SURFACE_SYSTEMD = "systemd"      # Quadlet / systemd integration
 
-# --- Yapılandırma dosyası yolları ------------------------------------------
+# --- Configuration file paths ------------------------------------------
 FILES = {
     "docker.daemon":      {"root": "/etc/docker/daemon.json",
                            "user": "~/.config/docker/daemon.json"},

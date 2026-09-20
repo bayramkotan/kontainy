@@ -231,9 +231,9 @@ class SettingsPage(Page):
             f"\u270e {sum(1 for s in self.filtered if self._is_editable(s))}"
             f" editable  \u00b7  showing {len(self.filtered)}"
             f" of {len(self.items)} settings"
-            f"  \u00b7  catalogue total {st['toplam']} "
+            f"  \u00b7  catalogue total {st['total']} "
             f"(docker {st['docker']} \u00b7 podman {st['podman']} "
-            f"\u00b7 shared {st['ortak']})")
+            f"\u00b7 shared {st['shared']})")
         if self.filtered:
             self.table.selectRow(0)
 
