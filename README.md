@@ -464,14 +464,19 @@ loginctl enable-linger $USER    # so containers survive logout
 
 kontainy answers three questions without opening a window:
 
+Installing gives you three names for the same thing: `kontainy`, the short
+`ky`, and `kty` kept from the first release.
+
 ```bash
-kontainy --scan      # the context chain, every engine, systemd unit states
-kontainy --doctor    # run every diagnostic rule and print the findings
-kontainy --stats     # catalogue, rule and Learn counts
+ky                   # the GUI
+ky --scan            # the context chain, every engine, systemd unit states
+ky --doctor          # run every diagnostic rule and print the findings
+ky --stats           # catalogue, rule and Learn counts
+ky --version         # print the version and exit
 ```
 
 ```console
-$ kontainy --scan
+$ ky --scan
 === Terminal target ===
   >> DOCKER_HOST (environment)          unix:///home/you/.docker/desktop/docker.sock
      DOCKER_CONTEXT (environment)       —

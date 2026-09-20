@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from ..core.catalog import stats as catalog_stats
 from ..core.constants import APP_NAME, APP_TAGLINE, APP_VERSION
 from ..learn.content import learn_stats
+from ..core.registry import stats as registry_stats
 from ..rules import rule_stats
 from ..utils.config import config, log
 from ..utils.workers import stop_all_jobs
@@ -32,13 +33,42 @@ from .pages.diagnostics import DiagnosticsPage
 from .pages.engines import EnginesPage
 from .pages.learn import LearnPage
 from .pages.logs import LogPage
-from .pages.settings import GotchasPage, SettingsPage
+from .pages.settings import SettingsPage
+from .pages.tools import (
+    ContainerToolsPage, DesktopToolsPage, KubernetesToolsPage,
+    SystemContainerToolsPage, VMToolsPage,
+)
 from .styles import get_colors, get_theme
 from .window_menu import WindowMenuMixin
 from .widgets import SidebarButton
 
-PAGE_CLASSES = (EnginesPage, ContainersPage, SettingsPage, GotchasPage,
-                DiagnosticsPage, LearnPage, LogPage)
+# The sidebar is grouped. A flat list of pages stopped being readable once
+# KVM, LXC and Kubernetes arrived, and "where is KVM" was the first thing
+# anyone asked. None means a section header rather than a page.
+SIDEBAR = [
+    ("OVERVIEW", None),
+    (None, EnginesPage),
+    (None, DiagnosticsPage),
+
+    ("WORKLOADS", None),
+    (None, ContainersPage),
+
+    ("PLATFORMS", None),
+    (None, ContainerToolsPage),
+    (None, KubernetesToolsPage),
+    (None, VMToolsPage),
+    (None, SystemContainerToolsPage),
+    (None, DesktopToolsPage),
+
+    ("CONFIGURE", None),
+    (None, SettingsPage),
+
+    ("LEARN", None),
+    (None, LearnPage),
+    (None, LogPage),
+]
+
+PAGE_CLASSES = tuple(cls for _, cls in SIDEBAR if cls is not None)
 
 
 class MainWindow(WindowMenuMixin, QMainWindow):
@@ -111,7 +141,7 @@ class MainWindow(WindowMenuMixin, QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(220)
+        sidebar.setFixedWidth(232)
         sl = QVBoxLayout(sidebar)
         sl.setContentsMargins(8, 16, 8, 16)
         sl.setSpacing(4)
@@ -132,8 +162,19 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.stack = QStackedWidget()
         self.pages = {}
         self.nav_buttons = []
+        self.section_labels = []
 
-        for index, page_class in enumerate(PAGE_CLASSES):
+        index = 0
+        for section, page_class in SIDEBAR:
+            if page_class is None:
+                if self.nav_buttons:
+                    sl.addSpacing(10)
+                label = QLabel(f"   {section}")
+                label.setObjectName("SidebarSection")
+                sl.addWidget(label)
+                self.section_labels.append(label)
+                continue
+
             page = page_class()
             self.pages[page.NAME] = page
             self.stack.addWidget(page)
@@ -146,13 +187,16 @@ class MainWindow(WindowMenuMixin, QMainWindow):
                 lambda _checked=False, i=index: self._switch_page(i))
             sl.addWidget(button)
             self.nav_buttons.append(button)
+            index += 1
 
         sl.addStretch()
 
         cs = catalog_stats()
         rs = rule_stats()
         ls = learn_stats()
+        ts = registry_stats()
         self.footer_label = QLabel(
+            f"      {ts['total']} tools · {ts['installed']} installed<br>"
             f"      {cs['total']} settings<br>"
             f"      {rs['total']} diagnostic rules<br>"
             f"      {ls['written']}/{ls['target']} Learn topics")
@@ -180,6 +224,9 @@ class MainWindow(WindowMenuMixin, QMainWindow):
             self.pages["containers"].set_endpoints)
         self.pages["diagnostics"].open_setting.connect(self._open_setting)
         self.pages["learn"].open_setting.connect(self._open_setting)
+        for name, page in self.pages.items():
+            if name.startswith("tools-"):
+                page.open_setting.connect(self._open_setting)
 
     # --- gezinme -----------------------------------------------------------
     def _switch_page(self, index: int) -> None:
@@ -246,6 +293,11 @@ class MainWindow(WindowMenuMixin, QMainWindow):
             f"color: {c['fg_muted']}; font-size: {c['fs_tiny']}px;")
         self.footer_label.setStyleSheet(
             f"color: {c['fg_muted']}; font-size: {c['fs_tiny']}px;")
+        for label in self.section_labels:
+            label.setStyleSheet(
+                f"color: {c['fg_muted']}; font-size: {c['fs_tiny']}px;"
+                f" font-weight: bold; letter-spacing: 1.2px;"
+                f" padding: 2px 0 4px 0;")
         self.catalog_label.setStyleSheet(
             f"color: {c['fg_muted']}; font-size: {c['fs_tiny']}px;")
 

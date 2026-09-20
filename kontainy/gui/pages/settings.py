@@ -26,14 +26,12 @@ class SettingsPage(Page):
     NAME = "settings"
     TITLE = "Settings"
     ICON = "⚙️"
-    SUBTITLE = ("The entire configuration surface of Docker and Podman. Rival "
-                "tools hide most of these; here they all sit, each with an "
-                "explanation and a gotcha note.")
-
-    ONLY_GOTCHAS = False
+    SUBTITLE = ("Every configuration key Docker and Podman have. Rival tools "
+                "hide most of them; here they all sit, with what each one "
+                "does and what breaks when it is set wrong.")
 
     def build(self) -> None:
-        self.items = with_gotchas() if self.ONLY_GOTCHAS else list(ALL_SETTINGS)
+        self.items = list(ALL_SETTINGS)
         self.filtered = []
         self.states = {}
         self.reader = StateReader()
@@ -78,6 +76,16 @@ class SettingsPage(Page):
             "Show only settings kontainy can write without elevation")
         self.editable_only.toggled.connect(self._apply)
         self.toolbar.addWidget(self.editable_only)
+
+        # 66 of the 152 settings carry a note about what breaks when they are
+        # misunderstood. That used to be a separate page called "Gotchas",
+        # which told nobody anything; it is a filter now.
+        self.with_warnings = QCheckBox("Has a warning")
+        self.with_warnings.setToolTip(
+            "Only settings that carry a note about what goes wrong when they "
+            "are misunderstood")
+        self.with_warnings.toggled.connect(self._apply)
+        self.toolbar.addWidget(self.with_warnings)
 
         split = QSplitter(Qt.Horizontal)
 
@@ -174,6 +182,8 @@ class SettingsPage(Page):
             rows = [s for s in rows if s.danger == di - 1]
         if self.editable_only.isChecked():
             rows = [s for s in rows if self._is_editable(s)]
+        if self.with_warnings.isChecked():
+            rows = [s for s in rows if s.gotcha]
         return rows
 
     def _is_editable(self, setting) -> bool:
@@ -416,7 +426,8 @@ class SettingsPage(Page):
 
         if s.gotcha:
             p.append("<div style='background:#3a2e12;border-left:4px solid #f9e2af;"
-                     f"padding:9px;margin-top:12px'><b>\u26a0 Gotcha</b><br>{s.gotcha}"
+                     f"padding:9px;margin-top:12px'>"
+                     f"<b>\u26a0 What goes wrong</b><br>{s.gotcha}"
                      "</div>")
         if s.tags:
             p.append("<p style='color:#9399b2'>Tags: "
@@ -463,22 +474,3 @@ class SettingsPage(Page):
 
         if s.cli:
             self.show_command(f"# {s.key} → {s.cli}", record=False)
-
-
-class GotchasPage(SettingsPage):
-    NAME = "gotchas"
-    TITLE = "Gotchas"
-    ICON = "⚠️"
-    SUBTITLE = ("Settings that burn hours when misunderstood. Listing a setting "
-                "is easy; writing down what breaks when it is wrong is not, "
-                "and no rival tool does it.")
-    ONLY_GOTCHAS = True
-
-    def apply_theme(self) -> None:
-        super().apply_theme()
-        c = self.colors()
-        self.table.setStyleSheet(
-            f"QTableWidget {{ font-size: {c['fs_base'] + 2}px; }}"
-            f"QTableWidget::item {{ padding: 7px 10px; }}"
-            f"QHeaderView::section {{ font-size: {c['fs_base'] + 1}px;"
-            f" font-weight: bold; padding: 9px; }}")

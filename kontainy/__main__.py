@@ -1,8 +1,8 @@
 """
 kontainy — entry point
 
-This module is what ``pip install kontainy`` wires the ``kontainy`` and
-``kty`` commands to, and it is also what ``python -m kontainy`` runs.
+This module is what ``pip install kontainy`` wires its commands to, and it is
+also what ``python -m kontainy`` runs.
 
 ⚠️ The package is deliberately named ``kontainy`` rather than ``src``. A
 distribution that installs a top-level ``src`` package (or a bare ``main``
@@ -10,11 +10,15 @@ module) collides with every other project that does the same, and quietly
 shadows anything the user imports by that name. The repository keeps the
 package directory at the root for exactly this reason.
 
+Three names install to the same entry point: ``kontainy``, the short ``ky``,
+and ``kty`` kept from 0.0.1.
+
 Usage:
-    kontainy            GUI
-    kontainy --scan     the context chain, every engine, systemd unit states
-    kontainy --doctor   run every diagnostic rule and print the findings
-    kontainy --stats    catalogue, rule and Learn counts
+    ky                  GUI
+    ky --scan           the context chain, every engine, systemd unit states
+    ky --doctor         run every diagnostic rule and print the findings
+    ky --stats          catalogue, rule and Learn counts
+    ky --version        print the version and exit
 """
 
 from __future__ import annotations
@@ -92,6 +96,13 @@ def cli_stats() -> int:
 
 
 def main() -> int:
+    if "--version" in sys.argv or "-V" in sys.argv:
+        from kontainy.core.constants import APP_NAME, APP_VERSION
+        print(f"{APP_NAME} {APP_VERSION}")
+        return 0
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print(__doc__)
+        return 0
     if "--scan" in sys.argv:
         return cli_scan()
     if "--doctor" in sys.argv:

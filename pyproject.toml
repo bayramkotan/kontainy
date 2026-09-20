@@ -40,7 +40,10 @@ Issues = "https://github.com/bayramkotan/kontainy/issues"
 Changelog = "https://github.com/bayramkotan/kontainy/releases"
 
 [project.scripts]
+# `ky` is the short form, the way VenvStudio installs `vs` alongside its own
+# name. `kty` is kept from 0.0.1 so nobody's muscle memory breaks.
 kontainy = "kontainy.__main__:main"
+ky = "kontainy.__main__:main"
 kty = "kontainy.__main__:main"
 
 [tool.setuptools]

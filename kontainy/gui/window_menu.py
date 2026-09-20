@@ -115,21 +115,30 @@ class WindowMenuMixin:
         for icon, label, page, shortcut, tip in (
             ("\U0001f50c", "Engines", "engines", "Ctrl+1",
              "Every socket found, and where your terminal points"),
-            ("\U0001f4e6", "Containers", "containers", "Ctrl+2",
-             "Containers from every engine, in one table"),
-            ("\u2699", "Settings", "settings", "Ctrl+3",
-             "Every Docker and Podman configuration key"),
-            ("\u26a0", "Gotchas", "gotchas", "Ctrl+4",
-             "Settings that burn hours when misunderstood"),
-            ("\U0001f52c", "Diagnostics", "diagnostics", "Ctrl+5",
+            ("\U0001f52c", "Diagnostics", "diagnostics", "Ctrl+2",
              "Detect, explain, fix"),
-            ("\U0001f4da", "Learn", "learn", "Ctrl+6",
+            ("\U0001f4e6", "Containers", "containers", "Ctrl+3",
+             "Containers from every engine, in one table"),
+            ("\U0001f433", "Container engines", "tools-containers", "Ctrl+4",
+             "Docker, Podman, containerd, buildah, skopeo"),
+            ("\u2638", "Kubernetes", "tools-kubernetes", "Ctrl+5",
+             "kubectl, k3s, kind, minikube, Helm"),
+            ("\U0001f5a5", "Virtual machines", "tools-vm", "Ctrl+6",
+             "KVM, QEMU, libvirt, virt-manager, VirtualBox"),
+            ("\U0001f9f1", "System containers", "tools-system", "Ctrl+7",
+             "LXC, LXD, Incus, systemd-nspawn, Distrobox"),
+            ("\U0001f5b1", "Desktop apps", "tools-desktop", "Ctrl+8",
+             "Docker Desktop, Podman Desktop, Lens, k9s, Cockpit"),
+            ("\u2699", "Settings", "settings", "Ctrl+9",
+             "Every Docker and Podman configuration key"),
+            ("\U0001f4da", "Learn", "learn", "Ctrl+0",
              "Containers from first principles"),
-            ("\U0001f4dd", "History & Log", "log", "Ctrl+7",
+            ("\U0001f4dd", "History & Log", "log", "",
              "Every command kontainy has run"),
         ):
             action = QAction(f"{icon} {label}", self)
-            action.setShortcut(shortcut)
+            if shortcut:
+                action.setShortcut(shortcut)
             action.setStatusTip(tip)
             action.triggered.connect(lambda _=False, name=page: self.go(name))
             view_menu.addAction(action)
@@ -149,6 +158,20 @@ class WindowMenuMixin:
             lambda: QDesktopServices.openUrl(
                 QUrl.fromLocalFile(str(config_dir()))))
         tools_menu.addAction(open_config)
+
+        tools_menu.addSeparator()
+
+        ext_apps = QAction("\U0001f5b1 External Applications\u2026", self)
+        ext_apps.setStatusTip(
+            "Docker Desktop, Podman Desktop, Virtual Machine Manager, Lens, "
+            "k9s, Cockpit \u2014 installed, running, installable")
+        ext_apps.triggered.connect(lambda: self.go("tools-desktop"))
+        tools_menu.addAction(ext_apps)
+
+        vmm = QAction("\U0001f5a5 Virtual Machine Manager\u2026", self)
+        vmm.setStatusTip("KVM, QEMU, libvirt and virt-manager")
+        vmm.triggered.connect(lambda: self.go("tools-vm"))
+        tools_menu.addAction(vmm)
 
         tools_menu.addSeparator()
 
