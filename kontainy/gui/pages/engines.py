@@ -204,7 +204,12 @@ class EnginesPage(Page):
             1, QHeaderView.Stretch)
 
         c = self.colors()
-        note = (f"Effective target: <b>{target.winner or '\u2014'}</b>"
+        # The fallback lives in a variable, not inside the braces. A backslash
+        # in an f-string expression is legal only from Python 3.12 (PEP 701);
+        # 3.10 and 3.11 refuse to compile the whole module, and kontainy
+        # supports 3.10.
+        winner = target.winner or "\u2014"
+        note = (f"Effective target: <b>{winner}</b>"
                 f" &nbsp;\u00b7&nbsp; via: {target.winner_layer}")
         shim = discovery.docker_shim_warning()
         if shim:
