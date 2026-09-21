@@ -513,6 +513,41 @@ jobs:
             exit 1
           fi
           echo "✅ README image paths are absolute"
+
+          # Every module in the source tree must be in the wheel. 0.0.4 went
+          # to PyPI without kontainy/core/providers: the package list in
+          # pyproject was written by hand and the new directory was never
+          # added. `ky -V` worked; the window could not open.
+          python - <<'PY'
+          import glob, pathlib, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          shipped = {n for n in zipfile.ZipFile(wheel).namelist() if n.endswith(".py")}
+          source = {p.as_posix() for p in pathlib.Path("kontainy").rglob("*.py")}
+          missing = sorted(source - shipped)
+          if missing:
+              sys.exit(f"::error::the wheel is missing {len(missing)} source files: {missing}")
+          print(f"✅ all {len(source)} source modules are in the wheel")
+          PY
+
+      # Install the wheel into a clean environment, away from the checkout,
+      # and actually start kontainy from it. The test suite runs from the
+      # source tree, so it can never see what the wheel left out; this can.
+      - name: Run the installed wheel
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install -q dist/*.whl
+          cd /tmp
+          /tmp/wheel-check/bin/ky --version
+          /tmp/wheel-check/bin/ky --stats | head -3
+          set +e
+          QT_QPA_PLATFORM=offscreen timeout 20 /tmp/wheel-check/bin/ky
+          code=$?
+          set -e
+          if [ "$code" != 124 ]; then
+            echo "::error::the installed wheel exited with code $code instead of staying open"
+            exit 1
+          fi
+          echo "✅ the installed wheel opens and stays up"
           python - <<'PY'
           import os, sys, zipfile
           wheel = next(f for f in os.listdir("dist") if f.endswith(".whl"))

@@ -40,7 +40,8 @@ from .base import Page
 def _probe(group: str, ids=None) -> list:
     """Status for a group of tools, or for an explicit list of tool ids."""
     rows = []
-    tools = ([reg.by_id(i) for i in ids if reg.by_id(i)] if ids
+    tools = ([reg.by_id(i) for i in ids
+              if reg.by_id(i) and reg.available_here(reg.by_id(i))] if ids
              else reg.by_group(group))
     for tool in tools:
         services = []
@@ -452,6 +453,10 @@ class InstallPage(Page):
                  "Desktop applications": "\U0001f5b1"}
         for group in reg.GROUPS:
             ids = [t.id for t in reg.by_group(group)]
+            if not ids:
+                # Nothing in this group exists on this operating system —
+                # System containers on Windows, for one. No empty tab.
+                continue
             panel = embedded_tools(ids, group.replace(" ", "_"))
             panel.status.connect(self.status.emit)
             panel.busy.connect(self.busy.emit)

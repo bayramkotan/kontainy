@@ -75,5 +75,6 @@ def test_gui_modules_import_without_qt():
                  "kontainy.gui.pages.overview", "kontainy.gui.dialogs.about",
                  "kontainy.gui.dialogs.run_command",
                  "kontainy.gui.pages.platform", "kontainy.gui.pages.overview",
+                 "kontainy.core.shellprofile",
                  "kontainy.gui.main_window"):
         importlib.import_module(name)

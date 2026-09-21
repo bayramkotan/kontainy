@@ -521,3 +521,341 @@ class WslProvider(Provider):
             listing.rows.append({"name": t.name, "state": t.detail,
                                  "version": t.address})
         return listing
+
+
+# ===========================================================================
+#  Object and bulk actions
+# ===========================================================================
+from ..elevate import run as _run
+
+
+def _sequence(id: str, label: str, commands: list, explanation: str,
+              destructive: bool = False) -> Action:
+    """Run several commands one after another — for tools like virsh that
+    take a single object per call. The dialog shows every line."""
+    def execute():
+        failures = []
+        for argv in commands:
+            result = _run(argv, note=id)
+            if not result.ok:
+                failures.append(f"{' '.join(argv)}: {result.output}")
+        if failures:
+            raise RuntimeError("\n".join(failures))
+        return f"{len(commands)} commands succeeded"
+    return Action(id=id, label=label, command=[], scope=USER,
+                  shell_text="\n".join(" ".join(c) for c in commands),
+                  explanation=explanation, destructive=destructive, func=execute)
+
+
+def _libvirt_running(row):
+    return str(row.get("state", "")).lower() in ("running", "idle", "paused")
+
+
+def _libvirt_object_actions(self, target, row):
+    uri = target.address if target else self._active_uri()
+    name = row.get("name", "")
+    base = ["virsh", "-c", uri]
+    out = []
+    if _libvirt_running(row):
+        out += [
+            action(f"virsh-shutdown-{name}", "\u23fb  Shut down",
+                   base + ["shutdown", name],
+                   "Asks the guest operating system to shut down cleanly, "
+                   "like pressing the power button once."),
+            action(f"virsh-reboot-{name}", "\u21bb  Reboot",
+                   base + ["reboot", name], "Asks the guest to reboot."),
+            action(f"virsh-destroy-{name}", "\u26a1  Force off",
+                   base + ["destroy", name],
+                   "Pulls the plug. Despite the name nothing is deleted, but "
+                   "unsaved data inside the guest is lost.", destructive=True),
+        ]
+    else:
+        out.append(action(f"virsh-start-{name}", "\u25b6  Start",
+                          base + ["start", name], f"Boots {name}."))
+    out.append(action(f"virsh-autostart-{name}", "\u23f0  Start at boot",
+                      base + ["autostart", name],
+                      "Starts this machine whenever the host boots."))
+    out.append(action(f"virsh-info-{name}", "\u2139  Info",
+                      base + ["dominfo", name],
+                      "State, CPUs, memory and autostart setting."))
+    return out
+
+
+def _libvirt_bulk(self, target, rows):
+    uri = target.address if target else self._active_uri()
+    stopped = [r["name"] for r in rows if not _libvirt_running(r)]
+    running = [r["name"] for r in rows if _libvirt_running(r)]
+    out = []
+    if stopped:
+        out.append(_sequence("virsh-start-all", f"\u25b6  Start all ({len(stopped)})",
+                             [["virsh", "-c", uri, "start", n] for n in stopped],
+                             "Boots every stopped machine on this connection. "
+                             "virsh takes one machine per command, so they run "
+                             "in turn."))
+    if running:
+        out.append(_sequence("virsh-shutdown-all",
+                             f"\u23fb  Shut down all ({len(running)})",
+                             [["virsh", "-c", uri, "shutdown", n] for n in running],
+                             "Asks every running guest to shut down cleanly.",
+                             destructive=True))
+    return out
+
+
+LibvirtProvider.object_actions = _libvirt_object_actions
+LibvirtProvider.bulk_actions = _libvirt_bulk
+
+
+def _remote_running(row):
+    return str(row.get("status", "")).lower() == "running"
+
+
+def _remote_object_actions(self, target, row):
+    name = row.get("name", "")
+    ref = f"{target.name}:{name}" if target else name
+    out = []
+    if _remote_running(row):
+        out += [action(f"{self.binary}-stop-{name}", "\u25a0  Stop",
+                       [self.binary, "stop", ref], f"Stops {name}."),
+                action(f"{self.binary}-restart-{name}", "\u21bb  Restart",
+                       [self.binary, "restart", ref], f"Restarts {name}.")]
+    else:
+        out.append(action(f"{self.binary}-start-{name}", "\u25b6  Start",
+                          [self.binary, "start", ref], f"Starts {name}."))
+    out.append(action(f"{self.binary}-delete-{name}", "\U0001f5d1  Delete",
+                      [self.binary, "delete", "--force", ref],
+                      f"Deletes {name} and its root filesystem.",
+                      destructive=True))
+    return out
+
+
+def _remote_bulk(self, target, rows):
+    prefix = f"{target.name}:" if target else ""
+    stopped = [prefix + r["name"] for r in rows if not _remote_running(r)]
+    running = [prefix + r["name"] for r in rows if _remote_running(r)]
+    out = []
+    if stopped:
+        out.append(action(f"{self.binary}-start-all",
+                          f"\u25b6  Start all ({len(stopped)})",
+                          [self.binary, "start"] + stopped,
+                          "Starts every stopped instance, in one command."))
+    if running:
+        out.append(action(f"{self.binary}-stop-all",
+                          f"\u25a0  Stop all ({len(running)})",
+                          [self.binary, "stop"] + running,
+                          "Stops every running instance, in one command.",
+                          destructive=True))
+    return out
+
+
+for _cls in (IncusProvider, LxdProvider):
+    _cls.object_actions = _remote_object_actions
+    _cls.bulk_actions = _remote_bulk
+
+
+def _kube_object_actions(self, target, row):
+    ctx = ["--context", target.name] if target else []
+    ns, name = row.get("namespace", "default"), row.get("name", "")
+    return [
+        action(f"kubectl-logs-{name}", "\U0001f4dc  Logs",
+               ["kubectl"] + ctx + ["-n", ns, "logs", "--tail=200", name],
+               "The last 200 lines from the pod's first container."),
+        action(f"kubectl-describe-{name}", "\u2139  Describe",
+               ["kubectl"] + ctx + ["-n", ns, "describe", "pod", name],
+               "Events, conditions and container states — where most "
+               "\u2018why is it not starting\u2019 answers are."),
+        action(f"kubectl-delete-{name}", "\u21bb  Delete (recreate)",
+               ["kubectl"] + ctx + ["-n", ns, "delete", "pod", name],
+               "Deletes the pod. If a Deployment, StatefulSet or DaemonSet "
+               "owns it, a replacement is created at once — the usual way to "
+               "restart a pod. A bare pod is simply gone.", destructive=True),
+    ]
+
+
+KubernetesProvider.object_actions = _kube_object_actions
+
+
+def _wsl_object_actions(self, target, row):
+    name = row.get("name", "")
+    return [
+        action(f"wsl-terminate-{name}", "\u25a0  Terminate",
+               ["wsl", "--terminate", name],
+               f"Stops {name}. Its files are untouched.", destructive=True),
+        action(f"wsl-run-{name}", "\u25b6  Start",
+               ["wsl", "-d", name, "-e", "true"],
+               f"Starts {name} in the background by running a no-op in it."),
+    ]
+
+
+def _wsl_bulk(self, target, rows):
+    return [action("wsl-shutdown", "\u25a0  Shut down all WSL",
+                   ["wsl", "--shutdown"],
+                   "Stops every distribution and the WSL virtual machine, "
+                   "including Docker Desktop's and podman machine's.",
+                   destructive=True)]
+
+
+WslProvider.object_actions = _wsl_object_actions
+WslProvider.bulk_actions = _wsl_bulk
+
+
+# ===========================================================================
+#  KVM / libvirt virtual networks
+# ===========================================================================
+import ipaddress as _ip
+import tempfile as _tempfile
+
+from .base import Section
+
+
+def parse_net_list(text: str) -> list:
+    """Parse `virsh net-list --all`: Name, State, Autostart, Persistent."""
+    rows = []
+    for line in text.splitlines():
+        if line.strip().startswith("--") or not line.strip():
+            continue
+        parts = line.split()
+        if parts[0] == "Name" or len(parts) < 4:
+            continue
+        rows.append({"name": parts[0], "state": parts[1],
+                     "autostart": parts[2], "persistent": parts[3]})
+    return rows
+
+
+def network_xml(name: str, bridge: str, address: str, prefix: int,
+                dhcp_start: str, dhcp_end: str, mode: str = "nat") -> str:
+    """A libvirt network definition. mode is nat, route or isolated."""
+    forward = "" if mode == "isolated" else f"  <forward mode='{mode}'/>\n"
+    dhcp = (f"    <dhcp>\n      <range start='{dhcp_start}' end='{dhcp_end}'/>\n"
+            f"    </dhcp>\n") if dhcp_start and dhcp_end else ""
+    netmask = str(_ip.IPv4Network(f"0.0.0.0/{prefix}").netmask)
+    return (f"<network>\n  <name>{name}</name>\n{forward}"
+            f"  <bridge name='{bridge}' stp='on' delay='0'/>\n"
+            f"  <ip address='{address}' netmask='{netmask}'>\n{dhcp}"
+            f"  </ip>\n</network>\n")
+
+
+def _net_listing(self, target):
+    uri = target.address if target else self._active_uri()
+    argv = ["virsh", "-c", uri, "net-list", "--all"]
+    ok, text = cli_text(argv)
+    listing = Listing(columns=[Column("name", "Network"), Column("state", "State"),
+                               Column("autostart", "At boot"),
+                               Column("persistent", "Persistent")],
+                      command=" ".join(argv))
+    if not ok:
+        listing.error = text
+    else:
+        listing.rows = parse_net_list(text)
+    return listing
+
+
+def _net_actions(self, target, row):
+    uri = target.address if target else self._active_uri()
+    base = ["virsh", "-c", uri]
+    name = row.get("name", "")
+    active = row.get("state") == "active"
+    out = []
+    if active:
+        out.append(action(f"net-destroy-{name}", "\u25a0  Stop",
+                          base + ["net-destroy", name],
+                          f"Stops {name}. Guests on it lose connectivity until "
+                          f"it is started again; the definition is kept.",
+                          destructive=True))
+    else:
+        out.append(action(f"net-start-{name}", "\u25b6  Start",
+                          base + ["net-start", name], f"Starts {name}."))
+    if row.get("autostart") == "yes":
+        out.append(action(f"net-noauto-{name}", "\u23f0  Don't start at boot",
+                          base + ["net-autostart", "--disable", name],
+                          f"{name} will no longer start with the host."))
+    else:
+        out.append(action(f"net-auto-{name}", "\u23f0  Start at boot",
+                          base + ["net-autostart", name],
+                          f"Starts {name} whenever the host boots. The "
+                          f"'default' network usually needs this, or VMs "
+                          f"come up with no network after a reboot."))
+    out.append(action(f"net-xml-{name}", "\U0001f4c4  Show definition",
+                      base + ["net-dumpxml", name],
+                      "The network's full XML: forward mode, bridge, "
+                      "addresses and DHCP range."))
+    out.append(action(f"net-leases-{name}", "\U0001f4cb  DHCP leases",
+                      base + ["net-dhcp-leases", name],
+                      "Which guest got which address — the quickest way to "
+                      "find a VM's IP."))
+    out.append(action(f"net-undefine-{name}", "\U0001f5d1  Delete",
+                      base + ["net-undefine", name],
+                      f"Deletes the definition of {name}. Stop it first; "
+                      f"guests that use it will have no network.",
+                      destructive=True))
+    return out
+
+
+NET_FIELDS = [
+    Field("name", "Name", "labnet"),
+    Field("bridge", "Bridge", "virbr10",
+          "The Linux bridge libvirt creates for this network."),
+    Field("address", "Host address", "192.168.110.1",
+          "The host's own address on this network; guests use it as gateway."),
+    Field("prefix", "Prefix", "24", "24 means 255.255.255.0."),
+    Field("dhcp_start", "DHCP from", "192.168.110.100", required=False),
+    Field("dhcp_end", "DHCP to", "192.168.110.200", required=False),
+    Field("mode", "Mode", "nat",
+          "nat (guests reach out through the host), route, or isolated "
+          "(guests see only each other and the host)."),
+]
+
+
+def _net_create(self, target, values):
+    uri = target.address if target else self._active_uri()
+    name = values["name"]
+    mode = (values.get("mode") or "nat").strip().lower()
+    if mode not in ("nat", "route", "isolated"):
+        mode = "nat"
+    xml = network_xml(name, values["bridge"], values["address"],
+                      int(values.get("prefix") or 24), values.get("dhcp_start", ""),
+                      values.get("dhcp_end", ""), mode)
+
+    def execute():
+        handle = _tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False,
+                                              encoding="utf-8")
+        handle.write(xml)
+        handle.close()
+        try:
+            for argv in (["virsh", "-c", uri, "net-define", handle.name],
+                         ["virsh", "-c", uri, "net-start", name],
+                         ["virsh", "-c", uri, "net-autostart", name]):
+                result = _run(argv, note=f"net-create-{name}")
+                if not result.ok:
+                    raise RuntimeError(f"{' '.join(argv)}: {result.output}")
+        finally:
+            os.unlink(handle.name)
+        return f"network {name} defined, started and set to start at boot"
+
+    return Action(
+        id=f"net-create-{name}", label=f"Create network '{name}'",
+        command=[], scope=USER,
+        shell_text=(f"cat > {name}.xml <<'EOF'\n{xml}EOF\n"
+                    f"virsh -c {uri} net-define {name}.xml\n"
+                    f"virsh -c {uri} net-start {name}\n"
+                    f"virsh -c {uri} net-autostart {name}"),
+        explanation=(f"Defines a {mode} network from the XML shown, starts it "
+                     f"and sets it to start at boot. On qemu:///system this "
+                     f"needs permission to manage libvirt — membership of the "
+                     f"libvirt group, or root."),
+        func=execute)
+
+
+def _libvirt_sections(self):
+    return [Section(
+        id="networks", title="Networks", icon="\U0001f310", noun="Network",
+        key="name",
+        summary=("Virtual networks the machines on this connection attach to. "
+                 "'default' is the NAT network most VMs use; if it is not "
+                 "active, guests boot with no network at all."),
+        listing=lambda target: _net_listing(self, target),
+        row_actions=lambda target, row: _net_actions(self, target, row),
+        create_fields=NET_FIELDS,
+        create=lambda target, values: _net_create(self, target, values))]
+
+
+LibvirtProvider.sections = _libvirt_sections

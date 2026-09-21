@@ -89,6 +89,10 @@ class Tool:
     learn_category: str = ""
     docs: str = ""
     note: str = ""
+    # Where the tool can run at all. KVM, QEMU's accelerated mode, libvirt,
+    # LXC and the systemd tools do not exist on Windows; listing them there
+    # offers something that can never work.
+    platforms: tuple = ("linux", "macos", "windows", "bsd")
 
     # --- status ------------------------------------------------------------
     def binary_path(self) -> str:
@@ -471,6 +475,21 @@ DESKTOP_TOOLS = [
 ALL_TOOLS = (CONTAINER_TOOLS + KUBERNETES_TOOLS + VM_TOOLS
              + SYSTEM_CONTAINER_TOOLS + DESKTOP_TOOLS)
 
+# Tools that cannot exist everywhere. KVM acceleration, libvirt, LXC and the
+# systemd-based tools are Linux; a few also run on macOS. Anything not listed
+# here runs on every platform kontainy supports.
+_ONLY_ON = {
+    "libvirt": ("linux", "macos"), "qemu": ("linux", "macos"),
+    "virt-manager": ("linux",), "incus": ("linux",), "lxc": ("linux",),
+    "lxd": ("linux",), "systemd-nspawn": ("linux",), "distrobox": ("linux",),
+    "cockpit": ("linux",), "k3s": ("linux",),
+    "containerd": ("linux", "macos"), "buildah": ("linux", "macos"),
+    "skopeo": ("linux", "macos"),
+}
+for _tool in ALL_TOOLS:
+    if _tool.id in _ONLY_ON:
+        _tool.platforms = _ONLY_ON[_tool.id]
+
 GROUPS = ["Containers", "Kubernetes", "Virtual machines",
           "System containers", "Desktop applications"]
 
@@ -482,8 +501,13 @@ def by_id(tool_id: str):
     return None
 
 
+def available_here(tool) -> bool:
+    return OS_KIND in tool.platforms
+
+
 def by_group(group: str) -> list:
-    return [t for t in ALL_TOOLS if t.group == group]
+    """Tools in a group that can exist on this operating system."""
+    return [t for t in ALL_TOOLS if t.group == group and available_here(t)]
 
 
 def installed_tools() -> list:

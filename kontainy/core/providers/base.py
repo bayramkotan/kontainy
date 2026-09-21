@@ -73,6 +73,42 @@ class Field:
     required: bool = True
 
 
+def socket_kind(address: str) -> str:
+    """Say plainly what kind of endpoint an address is.
+
+    The question this answers is the one the old Engines page never did:
+    is the selected socket root's or mine? A rootful socket runs containers
+    as root and needs group membership or sudo to reach; a rootless one runs
+    them as you and lives under /run/user.
+    """
+    a = (address or "").lower()
+    if not a or a in ("this machine", "local"):
+        return "local"
+    # podman machine is reached over SSH on localhost, so it must be
+    # recognised before the generic SSH case or it reads as a remote host.
+    if "podman-machine" in a or ("/podman/" in a and "@127.0.0.1" in a):
+        return "podman machine VM"
+    if a.startswith("ssh://"):
+        return "remote over SSH"
+    if a.startswith(("tcp://", "http://", "https://")):
+        return "remote over TCP"
+    if a.startswith("npipe://"):
+        return "Windows named pipe"
+    if "/.docker/desktop/" in a or "docker-desktop" in a:
+        return "Docker Desktop VM"
+    if "/run/user/" in a:
+        return "rootless \u00b7 your user socket"
+    if a.startswith(("unix:///run/", "unix:///var/run/", "/run/", "/var/run/")):
+        return "rootful \u00b7 system socket (root)"
+    if a.startswith(("qemu:///system", "lxc:///", "xen:///")):
+        return "system hypervisor (root)"
+    if a.startswith("qemu:///session"):
+        return "session hypervisor (your user)"
+    if a.startswith("qemu+ssh://"):
+        return "remote hypervisor over SSH"
+    return ""
+
+
 def cli_text(argv: list, timeout: float = 15.0) -> tuple:
     """Run a CLI and return (ok, text).
 
@@ -115,6 +151,27 @@ def json_value(text: str, default=None):
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return default
+
+
+@dataclass
+class Section:
+    """An extra tab of manageable things beyond the main objects.
+
+    KVM networks are the first: listed, started, stopped, set to start at
+    boot, and created from a form. Docker networks and volumes, Podman pods
+    and libvirt storage pools fit the same shape.
+    """
+
+    id: str
+    title: str
+    icon: str
+    noun: str                       # "Network"
+    key: str                        # column naming one row
+    summary: str
+    listing: object                 # callable(target) -> Listing
+    row_actions: object             # callable(target, row) -> [Action]
+    create_fields: list = field(default_factory=list)
+    create: object = None           # callable(target, values) -> Action
 
 
 class Provider:
@@ -190,8 +247,25 @@ class Provider:
         return []
 
     # --- objects ----------------------------------------------------------
+    object_key = "name"          # the column that names one object
+
     def objects(self, target) -> Listing:
         return Listing(error="This technology has no object listing yet.")
+
+    def object_actions(self, target, row: dict) -> list:
+        """What can be done to one object: start, stop, restart, remove..."""
+        return []
+
+    def bulk_actions(self, target, rows: list) -> list:
+        """Start all, stop all — over every object on the active target."""
+        return []
+
+    def can_edit_ports(self) -> bool:
+        return False
+
+    def sections(self) -> list:
+        """Extra tabs — networks, volumes, storage pools — as Section()s."""
+        return []
 
     # --- terminal ---------------------------------------------------------
     def terminal_env(self, target) -> dict:
@@ -206,5 +280,6 @@ def action(id: str, label: str, argv: list, explanation: str, *,
 
 
 __all__ = ["Provider", "Target", "Listing", "Column", "Field", "cli_text",
+           "socket_kind", "Section",
            "json_lines", "json_value", "action", "Action", "USER", "ROOT",
            "SHELL", "NONE"]

@@ -40,8 +40,20 @@ def test_install_commands_are_sudo_prefixed(tool):
 
 
 def test_every_group_has_tools():
+    """Every group has tools somewhere. Not necessarily on this platform —
+    System containers is empty on Windows by design, and checking by_group
+    here would fail the Windows CI job for a correct result."""
     for group in reg.GROUPS:
-        assert reg.by_group(group), f"{group} is empty"
+        assert any(t.group == group for t in reg.ALL_TOOLS), f"{group} is empty"
+
+
+def test_linux_only_tools_are_hidden_on_windows(monkeypatch):
+    monkeypatch.setattr(reg, "OS_KIND", "windows")
+    names = {t.id for g in reg.GROUPS for t in reg.by_group(g)}
+    for linux_only in ("qemu", "libvirt", "virt-manager", "incus", "lxc",
+                       "lxd", "systemd-nspawn", "k3s"):
+        assert linux_only not in names, f"{linux_only} offered on Windows"
+    assert "virtualbox" in names and "docker" in names
 
 
 def test_kvm_and_lxc_are_present():

@@ -25,12 +25,14 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QPushButton,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ...core import actions as act
 from ...core import registry as reg
+from ...core import shellprofile
+from ...core.providers.base import socket_kind
 from ...core.catalog import ALL_SETTINGS
 from ...core.terminal import describe, open_terminal
 from ...utils.workers import CallableJob, run_job
@@ -38,10 +40,20 @@ from .base import Page
 
 
 def _clear(layout) -> None:
+    """Empty a layout at once.
+
+    deleteLater() alone leaves the old buttons visible, at their old place,
+    until the event loop gets round to deleting them — so the buttons for the
+    previously selected row sat underneath the new ones. Hiding and
+    detaching them first makes them disappear immediately.
+    """
     while layout.count():
         item = layout.takeAt(0)
-        if item.widget():
-            item.widget().deleteLater()
+        widget = item.widget()
+        if widget is not None:
+            widget.hide()
+            widget.setParent(None)
+            widget.deleteLater()
 
 
 def _probe(provider) -> dict:
@@ -65,22 +77,22 @@ def _probe(provider) -> dict:
         "resolution": provider.resolution() if available else [],
         "units": units,
         "linger": act.linger_state() if provider.needs_linger else None,
+        "sections": ({s.id: s.listing(active) for s in provider.sections()}
+                     if available else {}),
     }
 
 
-class AddTargetDialog(QDialog):
-    """A form built from the provider's add_fields()."""
+class FieldsDialog(QDialog):
+    """A form built from a list of Field()s."""
 
-    def __init__(self, provider, parent=None):
+    def __init__(self, title: str, fields: list, parent=None):
         super().__init__(parent)
-        self.provider = provider
-        self.setWindowTitle(f"Add {provider.target_noun.lower()} "
-                            f"\u2014 {provider.name}")
+        self.setWindowTitle(title)
         self.resize(560, 0)
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.inputs = {}
-        for field in provider.add_fields():
+        for field in fields:
             box = QLineEdit()
             box.setPlaceholderText(field.placeholder)
             if field.hint:
@@ -113,6 +125,69 @@ class AddTargetDialog(QDialog):
     def values(self) -> dict:
         return {key: box.text().strip()
                 for key, (_f, box) in self.inputs.items()}
+
+
+def AddTargetDialog(provider, parent=None):
+    return FieldsDialog(f"Add {provider.target_noun.lower()} \u2014 "
+                        f"{provider.name}", provider.add_fields(), parent)
+
+
+class PortsDialog(QDialog):
+    """Edit a container's port mappings; applying recreates the container."""
+
+    def __init__(self, name: str, bindings: list, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Ports \u2014 {name}")
+        self.resize(640, 420)
+        layout = QVBoxLayout(self)
+        note = QLabel(
+            "Docker and Podman cannot change the ports of an existing "
+            "container. Applying these recreates it safely: the current one "
+            "is kept, stopped and renamed, and restored automatically if the "
+            "new one fails to start. Leave the host port empty to let the "
+            "engine pick one.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(
+            ["Host IP", "Host port", "Container port", "Protocol"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        for row in bindings:
+            self._add_row(*row)
+        layout.addWidget(self.table, 1)
+        buttons_row = QHBoxLayout()
+        add = QPushButton("\u2795  Add mapping")
+        add.setObjectName("secondary")
+        add.clicked.connect(lambda: self._add_row("", "", "", "tcp"))
+        remove = QPushButton("\U0001f5d1  Remove selected")
+        remove.setObjectName("secondary")
+        remove.clicked.connect(
+            lambda: self.table.removeRow(self.table.currentRow()))
+        buttons_row.addWidget(add)
+        buttons_row.addWidget(remove)
+        buttons_row.addStretch()
+        layout.addLayout(buttons_row)
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.button(QDialogButtonBox.Ok).setText("Review and apply\u2026")
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        layout.addWidget(box)
+
+    def _add_row(self, host_ip, host_port, container_port, proto):
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        for col, text in enumerate([host_ip, host_port, container_port,
+                                    proto or "tcp"]):
+            self.table.setItem(r, col, QTableWidgetItem(str(text)))
+
+    def bindings(self) -> list:
+        out = []
+        for r in range(self.table.rowCount()):
+            cells = [(self.table.item(r, c).text().strip()
+                      if self.table.item(r, c) else "") for c in range(4)]
+            if cells[2]:
+                out.append((cells[0], cells[1], cells[2], cells[3] or "tcp"))
+        return out
 
 
 class PlatformPage(Page):
@@ -184,10 +259,16 @@ class PlatformPage(Page):
                          f"\U0001f3af  {provider.target_noun_plural}")
         self.tabs.addTab(self._build_objects_tab(),
                          f"\U0001f4e6  {provider.object_noun_plural}")
+        self.section_widgets = {}
+        for section in provider.sections():
+            self.tabs.addTab(self._build_section_tab(section),
+                             f"{section.icon}  {section.title}")
         self.install_tab = self._build_install_tab()
         self.tabs.addTab(self.install_tab, "\U0001f4e5  Install")
         if provider.services:
             self.tabs.addTab(self._build_services_tab(), "\U0001f6e0  Services")
+        if shellprofile.VARIABLES.get(provider.id):
+            self.tabs.addTab(self._build_shell_tab(), "\U0001f41a  Shell")
         self.tabs.addTab(self._build_settings_tab(), "\u2699  Settings")
         self.body.addWidget(self.tabs, 1)
 
@@ -211,7 +292,7 @@ class PlatformPage(Page):
         layout.addWidget(summary)
 
         self.targets_table = self._table(
-            ["", provider.target_noun, "Address", "Detail"])
+            ["", provider.target_noun, "Address", "Kind", "Detail"])
         self.targets_table.doubleClicked.connect(self._activate_selected)
         layout.addWidget(self.targets_table, 1)
 
@@ -252,7 +333,12 @@ class PlatformPage(Page):
         self.objects_note.setWordWrap(True)
         layout.addWidget(self.objects_note)
         self.objects_table = self._table(["\u2014"])
+        self.objects_table.currentCellChanged.connect(self._object_selected)
         layout.addWidget(self.objects_table, 1)
+        self.object_buttons = QHBoxLayout()
+        layout.addLayout(self.object_buttons)
+        self.bulk_buttons = QHBoxLayout()
+        layout.addLayout(self.bulk_buttons)
         return tab
 
     def _build_install_tab(self) -> QWidget:
@@ -409,6 +495,7 @@ class PlatformPage(Page):
         self.busy.emit(False)
 
         self._fill_units(state.get("units") or [], state.get("linger"))
+        self._fill_shell()
 
         available = state["available"]
         self.selector.setEnabled(available)
@@ -452,6 +539,10 @@ class PlatformPage(Page):
         info = []
         if active:
             info.append(f"\U0001f4cd {active.address or active.name}")
+            kind = socket_kind(active.address)
+            if kind:
+                colour = c["warning"] if "root" in kind else c["accent"]
+                info.append(f"<b style='color:{colour}'>{kind}</b>")
             if active.detail:
                 info.append(active.detail)
         line = " &nbsp;\u00b7&nbsp; ".join(info)
@@ -461,6 +552,7 @@ class PlatformPage(Page):
         self.info_label.setText(line)
 
         self._fill_targets(state["targets"])
+        self._fill_sections(state.get("sections") or {})
         self._fill_resolution(state.get("resolution") or [])
         self._fill_objects(listing)
         self.status.emit(
@@ -476,7 +568,8 @@ class PlatformPage(Page):
             r = table.rowCount()
             table.insertRow(r)
             cells = ["\u2705" if target.active else "", target.name,
-                     target.address, target.detail]
+                     target.address, socket_kind(target.address),
+                     target.detail]
             for col, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 if target.active:
@@ -522,6 +615,7 @@ class PlatformPage(Page):
                 f"<br><code>{listing.command}</code>")
             return
         self.objects_note.setText(f"<code>{listing.command}</code>")
+        self._fill_bulk(listing.rows)
         for row in listing.rows:
             r = table.rowCount()
             table.insertRow(r)
@@ -531,6 +625,234 @@ class PlatformPage(Page):
         table.resizeColumnsToContents()
         if listing.command:
             self.show_command(listing.command, record=False)
+
+
+    # --- objects: per-object and bulk actions -------------------------------
+    def _button(self, action, layout) -> None:
+        button = QPushButton(action.label)
+        button.setCursor(Qt.PointingHandCursor)
+        if action.destructive:
+            button.setObjectName("danger")
+        elif action.scope != act.USER:
+            button.setObjectName("secondary")
+        button.clicked.connect(lambda _=False, a=action: self._run(a))
+        layout.addWidget(button)
+
+    def _object_row(self):
+        listing = (self.state or {}).get("objects")
+        row = self.objects_table.currentRow()
+        if not listing or listing.error or row < 0 or row >= len(listing.rows):
+            return None
+        return listing.rows[row]
+
+    def _object_selected(self, *_):
+        _clear(self.object_buttons)
+        row = self._object_row()
+        if row is None:
+            return
+        active = (self.state or {}).get("active")
+        label = QLabel(f"<b>{row.get(self.PROVIDER.object_key, '')}</b>")
+        label.setTextFormat(Qt.RichText)
+        self.object_buttons.addWidget(label)
+        for action in self.PROVIDER.object_actions(active, row):
+            self._button(action, self.object_buttons)
+        if self.PROVIDER.can_edit_ports():
+            ports = QPushButton("\U0001f50c  Ports\u2026")
+            ports.setObjectName("secondary")
+            ports.setCursor(Qt.PointingHandCursor)
+            ports.clicked.connect(lambda: self._edit_ports(row))
+            self.object_buttons.addWidget(ports)
+        self.object_buttons.addStretch()
+
+    def _fill_bulk(self, rows: list) -> None:
+        _clear(self.bulk_buttons)
+        active = (self.state or {}).get("active")
+        actions = self.PROVIDER.bulk_actions(active, rows)
+        if not actions:
+            return
+        label = QLabel("All on this target:")
+        self.bulk_buttons.addWidget(label)
+        for action in actions:
+            self._button(action, self.bulk_buttons)
+        self.bulk_buttons.addStretch()
+
+    def _edit_ports(self, row: dict) -> None:
+        provider = self.PROVIDER
+        active = (self.state or {}).get("active")
+        name = row.get(provider.object_key, "")
+        bindings, _info = provider.inspect_ports(active, name)
+        dialog = PortsDialog(name, bindings, self)
+        if dialog.exec() == QDialog.Accepted:
+            self._run(provider.recreate_with_ports(active, name,
+                                                   dialog.bindings()))
+
+
+    # --- extra sections (KVM networks, ...) ----------------------------------
+    def _build_section_tab(self, section) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        summary = QLabel(section.summary)
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
+        note = QLabel("")
+        note.setWordWrap(True)
+        note.setTextFormat(Qt.RichText)
+        layout.addWidget(note)
+        table = self._table(["\u2014"])
+        layout.addWidget(table, 1)
+        row_buttons = QHBoxLayout()
+        layout.addLayout(row_buttons)
+        bottom = QHBoxLayout()
+        if section.create is not None:
+            create = QPushButton(f"\u2795  New {section.noun.lower()}\u2026")
+            create.setCursor(Qt.PointingHandCursor)
+            create.clicked.connect(lambda _=False, s=section: self._create_in(s))
+            bottom.addWidget(create)
+        bottom.addStretch()
+        layout.addLayout(bottom)
+        widgets = {"section": section, "table": table, "note": note,
+                   "buttons": row_buttons, "rows": []}
+        table.currentCellChanged.connect(
+            lambda row, *_rest, w=widgets: self._section_selected(w, row))
+        self.section_widgets[section.id] = widgets
+        return tab
+
+    def _fill_sections(self, listings: dict) -> None:
+        c = self.colors()
+        for sid, widgets in self.section_widgets.items():
+            listing = listings.get(sid)
+            table = widgets["table"]
+            table.setRowCount(0)
+            _clear(widgets["buttons"])
+            if listing is None:
+                continue
+            table.setColumnCount(len(listing.columns) or 1)
+            table.setHorizontalHeaderLabels(
+                [col.title for col in listing.columns] or ["\u2014"])
+            widgets["rows"] = [] if listing.error else listing.rows
+            if listing.error:
+                widgets["note"].setText(
+                    f"<span style='color:{c['danger']}'>{listing.error}</span>"
+                    f"<br><code>{listing.command}</code>")
+                continue
+            widgets["note"].setText(f"<code>{listing.command}</code>")
+            for row in listing.rows:
+                r = table.rowCount()
+                table.insertRow(r)
+                for col, column in enumerate(listing.columns):
+                    table.setItem(r, col, QTableWidgetItem(
+                        str(row.get(column.key, ""))))
+            table.resizeColumnsToContents()
+
+    def _section_selected(self, widgets: dict, row: int) -> None:
+        _clear(widgets["buttons"])
+        rows = widgets["rows"]
+        if row < 0 or row >= len(rows):
+            return
+        section = widgets["section"]
+        active = (self.state or {}).get("active")
+        label = QLabel(f"<b>{rows[row].get(section.key, '')}</b>")
+        label.setTextFormat(Qt.RichText)
+        widgets["buttons"].addWidget(label)
+        for action in section.row_actions(active, rows[row]):
+            self._button(action, widgets["buttons"])
+        widgets["buttons"].addStretch()
+
+    def _create_in(self, section) -> None:
+        dialog = FieldsDialog(f"New {section.noun.lower()} \u2014 "
+                              f"{self.PROVIDER.name}", section.create_fields,
+                              self)
+        if dialog.exec() == QDialog.Accepted:
+            active = (self.state or {}).get("active")
+            self._run(section.create(active, dialog.values()))
+
+    # --- shell profile ---------------------------------------------------------
+    def _build_shell_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        path = shellprofile.profile_path()
+        note = QLabel(
+            f"Environment variables in your shell profile "
+            f"(<code>{path}</code>) pin new terminals to a target without "
+            f"changing the global choice. kontainy writes only inside its own "
+            f"marked block and never edits a line you wrote; your own lines "
+            f"are shown and can be commented out, with a backup. Changes take "
+            f"effect in new shells.")
+        note.setTextFormat(Qt.RichText)
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.shell_table = self._table(
+            ["Variable", "In kontainy's block", "Set elsewhere",
+             "In kontainy's environment"])
+        self.shell_table.currentCellChanged.connect(self._shell_selected)
+        layout.addWidget(self.shell_table, 1)
+        self.shell_why = QLabel("")
+        self.shell_why.setWordWrap(True)
+        layout.addWidget(self.shell_why)
+        self.shell_buttons = QHBoxLayout()
+        layout.addLayout(self.shell_buttons)
+        return tab
+
+    def _fill_shell(self) -> None:
+        if not hasattr(self, "shell_table"):
+            return
+        self.shell_entries = shellprofile.read(self.PROVIDER.id)
+        table = self.shell_table
+        table.setRowCount(0)
+        for entry in self.shell_entries:
+            r = table.rowCount()
+            table.insertRow(r)
+            elsewhere = "; ".join(f"line {n}: {text}"
+                                  for n, text in entry.foreign) or "\u2014"
+            for col, text in enumerate([entry.name,
+                                        entry.managed_value or "\u2014",
+                                        elsewhere,
+                                        entry.current or "\u2014"]):
+                table.setItem(r, col, QTableWidgetItem(text))
+        table.resizeColumnsToContents()
+        if self.shell_entries:
+            table.selectRow(0)
+
+    def _suggested_value(self, name: str) -> str:
+        active = (self.state or {}).get("active")
+        if not active:
+            return ""
+        if name in ("DOCKER_CONTEXT", "CONTAINER_CONNECTION"):
+            return "" if active.name == "(local)" else active.name
+        if name == "KUBECONFIG":
+            return str(shellprofile.Path.home() / ".kube" / "config")
+        return active.address
+
+    def _shell_selected(self, row, *_):
+        _clear(self.shell_buttons)
+        entries = getattr(self, "shell_entries", [])
+        if row < 0 or row >= len(entries):
+            return
+        entry = entries[row]
+        why = dict(shellprofile.VARIABLES[self.PROVIDER.id]).get(entry.name, "")
+        self.shell_why.setText(why)
+        suggested = self._suggested_value(entry.name)
+        if suggested:
+            self._button(shellprofile.set_action(entry.name, suggested),
+                         self.shell_buttons)
+        custom = QPushButton("\u270e  Set another value\u2026")
+        custom.setObjectName("secondary")
+        custom.clicked.connect(lambda: self._shell_custom(entry.name))
+        self.shell_buttons.addWidget(custom)
+        if entry.managed_value:
+            self._button(shellprofile.unset_action(entry.name),
+                         self.shell_buttons)
+        for number, text in entry.foreign:
+            self._button(shellprofile.comment_action(entry.name, number, text),
+                         self.shell_buttons)
+        self.shell_buttons.addStretch()
+
+    def _shell_custom(self, name: str) -> None:
+        value, ok = QInputDialog.getText(
+            self, name, f"Value for {name}:",
+            text=self._suggested_value(name))
+        if ok and value.strip():
+            self._run(shellprofile.set_action(name, value.strip()))
 
     # --- actions -----------------------------------------------------------
     def _target(self, name: str):
@@ -615,6 +937,7 @@ class PlatformPage(Page):
         for table in (getattr(self, "targets_table", None),
                       getattr(self, "objects_table", None),
                       getattr(self, "units_table", None),
+                      getattr(self, "shell_table", None),
                       getattr(self, "resolution_table", None)):
             if table is not None:
                 table.setStyleSheet(

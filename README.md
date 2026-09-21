@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Every Docker and Podman setting, in one interface</strong><br>
-  <sub>Rival tools hide the settings that matter. kontainy shows all of them — explained, with the gotcha attached</sub>
+  <sub>Docker, Podman, Kubernetes, KVM, Incus, LXD and WSL — every target selectable, every setting explained, every command shown before it runs</sub>
 </p>
 
 <p align="center">
@@ -17,9 +17,6 @@
     <img src="https://img.shields.io/github/v/release/bayramkotan/kontainy?style=for-the-badge&color=89b4fa&logo=github" alt="Release">
   </a>
   <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-f9e2af?style=for-the-badge" alt="Platform">
-  <a href="https://pypi.org/project/kontainy/">
-    <img src="https://img.shields.io/pypi/v/kontainy?style=for-the-badge&color=a6e3a1&logo=pypi&logoColor=white" alt="PyPI">
-  </a>
   <a href="https://github.com/bayramkotan/kontainy/stargazers">
     <img src="https://img.shields.io/github/stars/bayramkotan/kontainy?style=for-the-badge&color=f5c2e7&logo=github" alt="Stars">
   </a>
@@ -30,7 +27,7 @@
   <a href="#-educational-by-design">Educational</a> •
   <a href="#-install">Install</a> •
   <a href="#-features">Features</a> •
-  <a href="#-the-settings-catalogue">Settings</a> •
+  <a href="#-the-settings-catalogue">Config Catalog</a> •
   <a href="#-diagnostics">Diagnostics</a> •
   <a href="#-templates">Templates</a> •
   <a href="#-learn">Learn</a> •
@@ -57,7 +54,7 @@ it finds, separately, and shows them all in one table with an Engine column. A
 container is never lost — you can see which engine holds it.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/engines.png" alt="Engines — the resolved context chain and every reachable engine" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/docker.png" alt="Docker — the active context in a dropdown, with tabs for contexts, containers, install, services, shell and settings" width="850">
 </p>
 
 The `docker` CLI resolves its target through five layers, and the top one wins:
@@ -75,6 +72,34 @@ If `DOCKER_HOST` is set, the context is ignored completely — which is why
 this chain layer by layer and marks the winner.
 
 ---
+
+## 🧭 One page per technology
+
+Every container and virtualisation technology has the same shape under a
+different name: a set of **targets**, one of them **active**, each holding
+**objects**. kontainy gives each one the same page — a dropdown of targets
+at the top, the active one selected, and tabs underneath.
+
+| Technology | Target | Objects |
+|:---|:---|:---|
+| 🐳 **Docker** | contexts | containers |
+| 🦭 **Podman** | system connections | containers |
+| ☸ **Kubernetes** | kubeconfig contexts | pods |
+| 🖥 **KVM / libvirt** | connection URIs | virtual machines |
+| 🧱 **Incus** · 📦 **LXD** | remotes | instances |
+| 🪟 **WSL** *(Windows)* | distributions — including Docker Desktop's own Linux | distributions |
+
+On every page you can **switch the active target** from the dropdown,
+**add** one, **remove** one and **test** one; **start, stop, restart and
+remove** objects one at a time or **all at once**; manage the **system
+services** the technology depends on; install it with **the command for your
+own distribution**; and pin new terminals to a target through your **shell
+profile**. The line under the dropdown says what the active target really is
+— *rootful · system socket (root)*, *rootless · your user socket*, *Docker
+Desktop VM*, *remote over SSH*.
+
+Technologies that cannot exist on your operating system are not shown:
+there is no KVM page on Windows and no WSL page on Linux.
 
 ## 🎓 Educational by Design
 
@@ -95,7 +120,7 @@ This runs through the whole application:
 - **Create Container** — the preview grows as you tick boxes, syntax
   highlighted, and the same definition renders as a `docker run` command, a
   systemd Quadlet unit, or a compose service
-- **Settings** — every key shows its CLI equivalent, which file it lives in,
+- **Config Catalog** — every key shows its CLI equivalent, which file it lives in,
   and whether a restart is needed
 - **Diagnostics** — every finding ends in a command, and says whether it runs
   in user scope or needs root
@@ -212,7 +237,7 @@ nothing at all.
 | Declared vs effective value | ✗ | ✗ | **compared, mismatch flagged** |
 | All engines in one table | ✗ | ✗ | **✅ with Engine column** |
 | Where your terminal points | ✗ | ✗ | **✅ resolved chain** |
-| Gotcha note per setting | ✗ | ✗ | **✅ 66 of 152** |
+| "What goes wrong" note per setting | ✗ | ✗ | **✅ 66 of 152** |
 
 **152 settings** — 56 Docker, 67 Podman, 29 shared — spread across ten
 surfaces:
@@ -232,7 +257,7 @@ surfaces:
 
 Every entry carries: the key, the file it lives in, its type and valid choices,
 the default, the **CLI equivalent**, whether a restart is needed, user or root
-scope, a risk level, a description — and for 66 of them, the **gotcha**: what
+scope, a risk level, a description — and for 66 of them, **what goes wrong**: what
 breaks when the setting is misunderstood.
 
 > Listing a setting is easy. Writing down what happens when it is wrong is not,
@@ -499,7 +524,7 @@ $ ky --scan
      built-in default                   unix:///var/run/docker.sock
   EFFECTIVE: unix:///home/you/.docker/desktop/docker.sock
 
-=== Engines found ===
+=== Engines ===
  * unix:///home/you/.docker/desktop/docker.sock   docker 29.8.0 (rootful)
    unix:///run/user/1000/podman/podman.sock       podman 6.1.2 (rootless)
    unix:///run/docker.sock                        docker 29.8.1 (rootful)
@@ -510,7 +535,7 @@ $ ky --scan
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/settings.png" alt="Settings — declared value, effective value and the override chain" width="850">
+  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/catalog.png" alt="Config Catalog — declared value, effective value and the override chain" width="850">
 </p>
 <p align="center">
   <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/learn.png" alt="Learn — collapsible topic cards with highlighted snippets" width="850">

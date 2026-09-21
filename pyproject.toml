@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontainy"
-version = "0.0.4"
+version = "0.0.5"
 description = "Every Docker and Podman setting, in one interface - a desktop manager for containers, with diagnostics and built-in learning"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
@@ -46,13 +46,10 @@ kontainy = "kontainy.__main__:main"
 ky = "kontainy.__main__:main"
 kty = "kontainy.__main__:main"
 
-[tool.setuptools]
-# The import package is named after the project on purpose. Shipping a
-# top-level "src" package or a bare "main" module would collide with every
-# other distribution that does the same, and would shadow anything the user
-# imports by that name.
-packages = [
-    "kontainy", "kontainy.core", "kontainy.core.catalog", "kontainy.gui",
-    "kontainy.gui.pages", "kontainy.gui.dialogs", "kontainy.rules",
-    "kontainy.learn", "kontainy.utils",
-]
+[tool.setuptools.packages.find]
+# Discovered, never listed by hand. 0.0.4 shipped to PyPI without
+# kontainy/core/providers because the package list was written out manually
+# and nobody added the new directory to it; `ky -V` worked and the window
+# could not open. The import package is still named after the project, so
+# nothing called "src" or "main" can reach site-packages.
+include = ["kontainy", "kontainy.*"]
