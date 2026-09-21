@@ -285,21 +285,49 @@ jobs:
         run: |
           set +e
           APP=$(ls kontainy*.AppImage 2>/dev/null | head -1)
-          if [ -z "$APP" ]; then echo "no AppImage to test"; exit 0; fi
+          if [ -z "$APP" ]; then
+            echo "::error::linuxdeploy produced no AppImage"
+            exit 1
+          fi
           chmod +x "$APP"
-          # --scan needs no display and exercises discovery, the context chain
-          # and the systemd probes — the parts most likely to break in a bundle.
-          QT_QPA_PLATFORM=offscreen timeout 60 "$APP" --stats > /tmp/stats.log 2>&1
-          echo "--- stats ---"; cat /tmp/stats.log
-          if grep -q "^  total" /tmp/stats.log; then
-            echo "✅ catalogue loaded inside the AppImage"
-            echo "### AppImage smoke test passed" >> "$GITHUB_STEP_SUMMARY"
-            sed -n '1,12p' /tmp/stats.log >> "$GITHUB_STEP_SUMMARY"
+
+          # "./" is not optional. Without a slash, timeout looks the name up
+          # in PATH, finds nothing, and reports "No such file or directory"
+          # for a file sitting right there. That is exactly what happened on
+          # the first real run of this test (v0.0.3): the AppImage was fine
+          # and never got executed.
+          #
+          # APPIMAGE_EXTRACT_AND_RUN avoids needing FUSE on the runner, which
+          # is one more thing that can fail for reasons unrelated to kontainy.
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+            timeout 90 "./$APP" --stats > /tmp/stats.log 2>&1
+          code=$?
+          echo "--- exit code: $code ---"
+          cat /tmp/stats.log
+
+          # Tell the three failures apart; they have different causes.
+          if [ "$code" = 124 ]; then
+            reason="timed out after 90 seconds"
+          elif [ "$code" = 126 ] || [ "$code" = 127 ]; then
+            reason="could not be executed at all (exit $code)"
+          elif ! grep -q "^  total" /tmp/stats.log; then
+            reason="ran (exit $code) but printed no catalogue stats"
           else
-            echo "::error::AppImage produced no catalogue stats — the bundle "
-            echo "::error::starts but cannot load its own package."
+            reason=""
+          fi
+
+          if [ -z "$reason" ]; then
+            echo "✅ AppImage runs and loads its own package"
             {
-              echo "### ⚠️ AppImage smoke test FAILED"
+              echo "### ✅ AppImage smoke test passed"
+              echo '```'
+              sed -n '1,12p' /tmp/stats.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::AppImage smoke test failed: the bundle $reason"
+            {
+              echo "### ⚠️ AppImage smoke test FAILED — $reason"
               echo '```'
               cat /tmp/stats.log
               echo '```'
