@@ -45,8 +45,10 @@ TERMINALS = [
 START_PAGES = [
     ("engines", "Engines"), ("diagnostics", "Diagnostics"),
     ("containers", "Containers"),
-    ("tools-containers", "Container engines"),
-    ("tools-kubernetes", "Kubernetes"),
-    ("tools-vm", "Virtual machines"),
+    ("platform-docker", "Docker"),
+    ("platform-podman", "Podman"),
+    ("platform-kubernetes", "Kubernetes"),
+    ("platform-libvirt", "KVM / libvirt"),
+    ("install", "Install"),
     ("catalog", "Config Catalog"), ("learn", "Learn"),
 ]

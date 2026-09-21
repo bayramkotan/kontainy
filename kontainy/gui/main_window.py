@@ -35,10 +35,10 @@ from .pages.learn import LearnPage
 from .pages.logs import LogPage
 from .pages.preferences import PreferencesPage
 from .pages.settings import CatalogPage
-from .pages.tools import (
-    ContainerToolsPage, DesktopToolsPage, KubernetesToolsPage,
-    SystemContainerToolsPage, VMToolsPage,
-)
+from ..core.providers import PROVIDERS
+from ..core.registry import OS_KIND
+from .pages.platform import make_platform_page
+from .pages.tools import InstallPage
 from .styles import get_colors, get_theme
 from .window_menu import WindowMenuMixin
 from .widgets import SidebarButton
@@ -46,22 +46,48 @@ from .widgets import SidebarButton
 # The sidebar is grouped. A flat list of pages stopped being readable once
 # KVM, LXC and Kubernetes arrived, and "where is KVM" was the first thing
 # anyone asked. None means a section header rather than a page.
+def _platform(provider_id: str):
+    """The page class for one provider, or None where it cannot exist.
+
+    WSL is Windows-only and libvirt does not run on Windows; showing either
+    where it can never work would only be clutter.
+    """
+    for provider in PROVIDERS:
+        if provider.id == provider_id:
+            if OS_KIND not in provider.platforms:
+                return None
+            return make_platform_page(provider)
+    return None
+
+
+# Grouped by technology, the way the user asked for it: every container and
+# virtualisation technology gets its own entry, each with the same layout —
+# an active-target dropdown on top and tabs underneath, like VenvStudio's
+# Packages page. None marks a section header; entries that resolve to None
+# for this operating system are dropped.
 SIDEBAR = [
     ("OVERVIEW", None),
     (None, EnginesPage),
     (None, DiagnosticsPage),
 
-    ("WORKLOADS", None),
+    ("CONTAINERS", None),
+    (None, _platform("docker")),
+    (None, _platform("podman")),
     (None, ContainersPage),
 
-    ("PLATFORMS", None),
-    (None, ContainerToolsPage),
-    (None, KubernetesToolsPage),
-    (None, VMToolsPage),
-    (None, SystemContainerToolsPage),
-    (None, DesktopToolsPage),
+    ("ORCHESTRATION", None),
+    (None, _platform("kubernetes")),
 
-    ("CONFIGURE", None),
+    ("VIRTUALISATION", None),
+    (None, _platform("libvirt")),
+    (None, _platform("wsl")),
+
+    ("SYSTEM CONTAINERS", None),
+    (None, _platform("incus")),
+    (None, _platform("lxd")),
+
+    ("SET UP", None),
+    (None, InstallPage),
     (None, CatalogPage),
     (None, PreferencesPage),
 
@@ -69,6 +95,22 @@ SIDEBAR = [
     (None, LearnPage),
     (None, LogPage),
 ]
+
+
+def _drop_empty_sections(entries: list) -> list:
+    """Remove unavailable pages, then any header left with nothing under it."""
+    kept = [(h, cls) for h, cls in entries if h is not None or cls is not None]
+    out = []
+    for index, (header, cls) in enumerate(kept):
+        if header is not None:
+            following = kept[index + 1] if index + 1 < len(kept) else None
+            if following is None or following[0] is not None:
+                continue
+        out.append((header, cls))
+    return out
+
+
+SIDEBAR = _drop_empty_sections(SIDEBAR)
 
 PAGE_CLASSES = tuple(cls for _, cls in SIDEBAR if cls is not None)
 
@@ -229,7 +271,7 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.pages["preferences"].theme_changed.connect(self.set_theme)
         self.pages["preferences"].restart_needed.connect(self._set_status)
         for name, page in self.pages.items():
-            if name.startswith("tools-"):
+            if name.startswith("platform-") or name == "install":
                 page.open_setting.connect(self._open_setting)
 
     # --- gezinme -----------------------------------------------------------

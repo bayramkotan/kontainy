@@ -107,39 +107,19 @@ class WindowMenuMixin:
 
         view_menu.addSeparator()
 
-        # Page navigation belongs in View, not Tools. Tools is for things that
-        # act on the system; View is for what you are looking at.
-        for icon, label, page, shortcut, tip in (
-            ("\U0001f50c", "Engines", "engines", "Ctrl+1",
-             "Every socket found, and where your terminal points"),
-            ("\U0001f52c", "Diagnostics", "diagnostics", "Ctrl+2",
-             "Detect, explain, fix"),
-            ("\U0001f4e6", "Containers", "containers", "Ctrl+3",
-             "Containers from every engine, in one table"),
-            ("\U0001f433", "Container engines", "tools-containers", "Ctrl+4",
-             "Docker, Podman, containerd, buildah, skopeo"),
-            ("\u2638", "Kubernetes", "tools-kubernetes", "Ctrl+5",
-             "kubectl, k3s, kind, minikube, Helm"),
-            ("\U0001f5a5", "Virtual machines", "tools-vm", "Ctrl+6",
-             "KVM, QEMU, libvirt, virt-manager, VirtualBox"),
-            ("\U0001f9f1", "System containers", "tools-system", "Ctrl+7",
-             "LXC, LXD, Incus, systemd-nspawn, Distrobox"),
-            ("\U0001f5b1", "Desktop apps", "tools-desktop", "Ctrl+8",
-             "Docker Desktop, Podman Desktop, Lens, k9s, Cockpit"),
-            ("\U0001f5c2", "Config Catalog", "catalog", "Ctrl+9",
-             "Every Docker and Podman configuration key"),
-            ("\u2699", "Preferences", "preferences", "Ctrl+,",
-             "kontainy's own settings: theme, fonts, language, engines"),
-            ("\U0001f4da", "Learn", "learn", "Ctrl+0",
-             "Containers from first principles"),
-            ("\U0001f4dd", "History & Log", "log", "",
-             "Every command kontainy has run"),
-        ):
-            action = QAction(f"{icon} {label}", self)
-            if shortcut:
-                action.setShortcut(shortcut)
-            action.setStatusTip(tip)
-            action.triggered.connect(lambda _=False, name=page: self.go(name))
+        # Page navigation belongs in View, not Tools. Built from the sidebar
+        # itself, so the menu can never list a page that does not exist on
+        # this operating system, or miss one that does.
+        shortcuts = ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5",
+                     "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9", "Ctrl+0"]
+        for index, (name, page) in enumerate(self.pages.items()):
+            action = QAction(f"{page.ICON}  {page.TITLE}", self)
+            if index < len(shortcuts):
+                action.setShortcut(shortcuts[index])
+            if name == "preferences":
+                action.setShortcut("Ctrl+,")
+            action.setStatusTip(page.SUBTITLE[:120])
+            action.triggered.connect(lambda _=False, n=name: self.go(n))
             view_menu.addAction(action)
 
         # ── Tools ─────────────────────────────────────────────────────────
@@ -164,12 +144,14 @@ class WindowMenuMixin:
         ext_apps.setStatusTip(
             "Docker Desktop, Podman Desktop, Virtual Machine Manager, Lens, "
             "k9s, Cockpit \u2014 installed, running, installable")
-        ext_apps.triggered.connect(lambda: self.go("tools-desktop"))
+        ext_apps.triggered.connect(self._open_external_apps)
         tools_menu.addAction(ext_apps)
 
         vmm = QAction("\U0001f5a5 Virtual Machine Manager\u2026", self)
         vmm.setStatusTip("KVM, QEMU, libvirt and virt-manager")
-        vmm.triggered.connect(lambda: self.go("tools-vm"))
+        vmm.triggered.connect(
+            lambda: self.go("platform-libvirt")
+            if "platform-libvirt" in self.pages else self._open_external_apps())
         tools_menu.addAction(vmm)
 
 
@@ -258,6 +240,10 @@ class WindowMenuMixin:
             QMessageBox.warning(self, "Export failed", str(exc))
             return
         self._set_status(f"Command history exported to {path}")
+
+    def _open_external_apps(self) -> None:
+        self.go("install")
+        self.pages["install"].show_group("Desktop applications")
 
     def _show_about(self) -> None:
         from .dialogs.about import AboutDialog

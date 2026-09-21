@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..utils import fs
-from ..utils.config import log
+from ..utils.config import history, log
 from . import discovery
 from .api import EngineError
 from .elevate import CommandResult, run, run_elevated
@@ -49,14 +49,27 @@ class Action:
     shell_text: str = ""             # what to paste when scope is SHELL
     destructive: bool = False
     note: str = ""
+    # Some actions are not a command at all but a file kontainy writes itself
+    # — libvirt's uri_default, for instance. They still go through the same
+    # show-first dialog; shell_text then carries the equivalent command so the
+    # user sees exactly what is about to change and could do it by hand.
+    func: object = None
 
     def display(self) -> str:
-        if self.scope == SHELL:
+        if self.scope == SHELL or (self.func is not None and self.shell_text):
             return self.shell_text
         prefix = "sudo " if self.scope == ROOT else ""
         return prefix + " ".join(self.command)
 
     def execute(self) -> CommandResult:
+        if self.func is not None:
+            try:
+                message = self.func() or "done"
+                history().add(self.display(), note=self.id, ok=True)
+                return CommandResult(self.display(), 0, str(message))
+            except Exception as exc:                          # noqa: BLE001
+                history().add(self.display(), note=self.id, ok=False)
+                return CommandResult(self.display(), 1, "", str(exc))
         if self.scope == SHELL or not self.command:
             return CommandResult(self.display(), 1,
                                  skipped="must be run in your own shell")

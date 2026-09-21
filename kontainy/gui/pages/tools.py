@@ -37,10 +37,12 @@ from ..styles import cmd_html
 from .base import Page
 
 
-def _probe(group: str) -> list:
-    """Status for every tool in a group, gathered off the GUI thread."""
+def _probe(group: str, ids=None) -> list:
+    """Status for a group of tools, or for an explicit list of tool ids."""
     rows = []
-    for tool in reg.by_group(group):
+    tools = ([reg.by_id(i) for i in ids if reg.by_id(i)] if ids
+             else reg.by_group(group))
+    for tool in tools:
         services = []
         for unit, user in tool.services:
             state = act._unit_property(unit, user, "is-active")
@@ -61,6 +63,7 @@ class ToolsPage(Page):
     """Base for every group page. Subclasses only set GROUP and the labels."""
 
     GROUP = "Containers"
+    TOOL_IDS = None           # set to restrict the page to these tools
     open_setting = Signal(str)
 
     def build(self) -> None:
@@ -104,7 +107,8 @@ class ToolsPage(Page):
         self.refresh_btn.setEnabled(False)
         self.busy.emit(True)
         self.status.emit(f"Checking {self.GROUP.lower()}\u2026")
-        run_job(CallableJob(_probe, self.GROUP), self._fill, self._failed)
+        run_job(CallableJob(_probe, self.GROUP, self.TOOL_IDS),
+                self._fill, self._failed)
 
     def _failed(self, message: str) -> None:
         self.refresh_btn.setEnabled(True)
@@ -405,3 +409,71 @@ class DesktopToolsPage(ToolsPage):
     GROUP = "Desktop applications"
     SUBTITLE = ("Docker Desktop, Podman Desktop, Lens, k9s and Cockpit. "
                 "Install them, and see whether their services are running.")
+
+
+def embedded_tools(tool_ids: list, label: str) -> ToolsPage:
+    """A tools list for a platform page's Install tab.
+
+    Same install, remove and service logic as the standalone pages, without
+    the page chrome — one implementation, two places.
+    """
+    cls = type(f"EmbeddedTools_{label}", (ToolsPage,), {
+        "NAME": f"embedded-{label}", "TITLE": "", "SUBTITLE": "",
+        "GROUP": label, "TOOL_IDS": list(tool_ids)})
+    page = cls()
+    page.header.hide()
+    page.command_strip.hide()
+    page.layout().setContentsMargins(0, 6, 0, 0)
+    return page
+
+
+class InstallPage(Page):
+    """Every installable tool, one tab per group — VenvStudio's tab layout.
+
+    Replaces five separate sidebar pages. The platform pages each carry an
+    Install tab for their own tools; this page is the whole catalogue.
+    """
+
+    NAME = "install"
+    TITLE = "Install"
+    ICON = "\U0001f4e5"
+    SUBTITLE = ("Every engine and tool kontainy knows, with the install "
+                "command for this system and for every other platform. "
+                "Nothing runs before the command is shown.")
+    open_setting = Signal(str)
+
+    def build(self) -> None:
+        from PySide6.QtWidgets import QTabWidget
+        self.tabs = QTabWidget()
+        self.panels = {}
+        icons = {"Containers": "\U0001f433", "Kubernetes": "\u2638",
+                 "Virtual machines": "\U0001f5a5",
+                 "System containers": "\U0001f9f1",
+                 "Desktop applications": "\U0001f5b1"}
+        for group in reg.GROUPS:
+            ids = [t.id for t in reg.by_group(group)]
+            panel = embedded_tools(ids, group.replace(" ", "_"))
+            panel.status.connect(self.status.emit)
+            panel.busy.connect(self.busy.emit)
+            self.panels[group] = panel
+            self.tabs.addTab(panel, f"{icons.get(group, '')}  {group}")
+        self.tabs.currentChanged.connect(self._tab_changed)
+        self.body.addWidget(self.tabs, 1)
+
+    def _tab_changed(self, index: int) -> None:
+        panel = self.tabs.widget(index)
+        if panel is not None and not panel.rows:
+            panel.refresh()
+
+    def on_shown(self) -> None:
+        self._tab_changed(self.tabs.currentIndex())
+
+    def show_group(self, group: str) -> None:
+        panel = self.panels.get(group)
+        if panel is not None:
+            self.tabs.setCurrentWidget(panel)
+
+    def apply_theme(self) -> None:
+        super().apply_theme()
+        for panel in self.panels.values():
+            panel.apply_theme()
