@@ -10,7 +10,7 @@ yükseltilir — sormak da yok, beklenir.
 """
 
 APP_NAME = "kontainy"
-APP_VERSION = "0.0.3"
+APP_VERSION = "0.0.4"
 APP_TAGLINE = "Every Docker and Podman setting, in one interface"
 APP_REPO = "https://github.com/bayramkotan/kontainy"
 
@@ -43,7 +43,7 @@ TERMINALS = [
 ]
 
 START_PAGES = [
-    ("engines", "Engines"), ("diagnostics", "Diagnostics"),
+    ("overview", "Overview"), ("diagnostics", "Diagnostics"),
     ("containers", "Containers"),
     ("platform-docker", "Docker"),
     ("platform-podman", "Podman"),

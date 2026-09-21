@@ -435,8 +435,20 @@ git clone https://github.com/bayramkotan/kontainy.git
 cd kontainy
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python main.py
+.venv/bin/pip install -e .
 ```
+
+The last line installs the repository in *editable* mode, which puts the
+`kontainy`, `ky` and `kty` commands into the virtual environment and points
+them at the checked-out code — edit a file and `ky` runs the new version.
+Activate the environment (`source .venv/bin/activate`, or
+`.venv\Scripts\activate` on Windows) and run:
+
+```bash
+ky
+```
+
+Running `python main.py` also works, but installs no commands.
 
 ### Linux — system dependencies
 

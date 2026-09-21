@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from ...core import actions as act
 from ...core import registry as reg
 from ...core.catalog import ALL_SETTINGS
 from ...core.terminal import describe, open_terminal
@@ -36,11 +37,24 @@ from ...utils.workers import CallableJob, run_job
 from .base import Page
 
 
+def _clear(layout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        if item.widget():
+            item.widget().deleteLater()
+
+
 def _probe(provider) -> dict:
     """Everything the page needs, gathered off the GUI thread."""
     available = provider.available()
     targets = provider.targets() if available else []
     active = next((t for t in targets if t.active), None)
+    units = []
+    for unit, user, why in provider.services:
+        state = act._unit_property(unit, user, "is-active")
+        enabled = act._unit_property(unit, user, "is-enabled")
+        units.append(act.Unit(name=unit, user=user, state=state,
+                              enabled=enabled, description=why))
     return {
         "available": available,
         "version": provider.version() if available else "",
@@ -48,6 +62,9 @@ def _probe(provider) -> dict:
         "active": active,
         "objects": provider.objects(active) if available else None,
         "warning": provider.warning() if available else "",
+        "resolution": provider.resolution() if available else [],
+        "units": units,
+        "linger": act.linger_state() if provider.needs_linger else None,
     }
 
 
@@ -124,7 +141,7 @@ class PlatformPage(Page):
         bar.addWidget(self.name_label)
 
         self.selector = QComboBox()
-        self.selector.setMinimumWidth(280)
+        self.selector.setMinimumWidth(220)
         self.selector.setToolTip(
             f"The active {provider.target_noun.lower()}. Choosing another "
             f"shows the command that switches to it before anything runs.")
@@ -147,7 +164,7 @@ class PlatformPage(Page):
         bar.addWidget(self.count_label)
         bar.addStretch()
 
-        self.refresh_btn = QPushButton("\U0001f501")
+        self.refresh_btn = QPushButton("\u21bb")
         self.refresh_btn.setObjectName("secondary")
         self.refresh_btn.setToolTip("Re-read everything")
         self.refresh_btn.setFixedWidth(44)
@@ -169,6 +186,8 @@ class PlatformPage(Page):
                          f"\U0001f4e6  {provider.object_noun_plural}")
         self.install_tab = self._build_install_tab()
         self.tabs.addTab(self.install_tab, "\U0001f4e5  Install")
+        if provider.services:
+            self.tabs.addTab(self._build_services_tab(), "\U0001f6e0  Services")
         self.tabs.addTab(self._build_settings_tab(), "\u2699  Settings")
         self.body.addWidget(self.tabs, 1)
 
@@ -195,6 +214,19 @@ class PlatformPage(Page):
             ["", provider.target_noun, "Address", "Detail"])
         self.targets_table.doubleClicked.connect(self._activate_selected)
         layout.addWidget(self.targets_table, 1)
+
+        # How the CLI actually picks its target. For Docker this is the part
+        # people never see: a set DOCKER_HOST beats every context silently.
+        self.resolution_label = QLabel(
+            f"<b>How the {provider.binary} command picks its target</b> "
+            f"\u2014 highest priority first; the marked layer wins")
+        self.resolution_label.setTextFormat(Qt.RichText)
+        self.resolution_table = self._table(["Layer", "Value", "Wins"])
+        self.resolution_table.setMaximumHeight(170)
+        self.resolution_label.hide()
+        self.resolution_table.hide()
+        layout.addWidget(self.resolution_label)
+        layout.addWidget(self.resolution_table)
 
         row = QHBoxLayout()
         for text, handler, kind in (
@@ -229,6 +261,84 @@ class PlatformPage(Page):
                                           self.PROVIDER.id)
         self.tools_panel.status.connect(self.status.emit)
         return self.tools_panel
+
+    def _build_services_tab(self) -> QWidget:
+        provider = self.PROVIDER
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        note = QLabel(
+            f"The system services {provider.name} depends on. Select one to "
+            f"start, stop, enable at boot or read its status \u2014 every "
+            f"command is shown before it runs.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.units_table = self._table(
+            ["Unit", "Scope", "State", "At boot", "What it does"])
+        self.units_table.currentCellChanged.connect(self._unit_selected)
+        layout.addWidget(self.units_table, 1)
+        self.unit_buttons = QHBoxLayout()
+        layout.addLayout(self.unit_buttons)
+        self.linger_row = QHBoxLayout()
+        layout.addLayout(self.linger_row)
+        return tab
+
+    def _fill_units(self, units: list, linger) -> None:
+        if not hasattr(self, "units_table"):
+            return
+        c = self.colors()
+        table = self.units_table
+        table.setRowCount(0)
+        for unit in units:
+            r = table.rowCount()
+            table.insertRow(r)
+            cells = [unit.name, unit.scope_label, unit.state, unit.enabled,
+                     unit.description]
+            for col, text in enumerate(cells):
+                item = QTableWidgetItem(str(text))
+                if col == 2:
+                    item.setForeground(QColor(
+                        c["success"] if unit.active else c["fg_muted"]))
+                table.setItem(r, col, item)
+        table.resizeColumnsToContents()
+        if units:
+            table.selectRow(0)
+
+        _clear(self.linger_row)
+        if linger is not None:
+            label = QLabel(
+                f"Linger: <b style='color:"
+                f"{c['success'] if linger else c['warning']}'>"
+                f"{'enabled' if linger else 'disabled'}</b> \u2014 "
+                + ("your user services keep running after logout and "
+                   "start at boot." if linger else
+                   "rootless containers stop when you log out and do not "
+                   "come back after a reboot."))
+            label.setTextFormat(Qt.RichText)
+            label.setWordWrap(True)
+            self.linger_row.addWidget(label, 1)
+            action = act.linger_action(bool(linger))
+            button = QPushButton(action.label)
+            button.setCursor(Qt.PointingHandCursor)
+            if action.destructive:
+                button.setObjectName("danger")
+            button.clicked.connect(lambda _=False, a=action: self._run(a))
+            self.linger_row.addWidget(button)
+
+    def _unit_selected(self, row, *_):
+        units = (self.state or {}).get("units") or []
+        _clear(self.unit_buttons)
+        if row < 0 or row >= len(units):
+            return
+        for action in act.actions_for_unit(units[row]):
+            button = QPushButton(action.label)
+            button.setCursor(Qt.PointingHandCursor)
+            if action.destructive:
+                button.setObjectName("danger")
+            elif action.scope != act.USER:
+                button.setObjectName("secondary")
+            button.clicked.connect(lambda _=False, a=action: self._run(a))
+            self.unit_buttons.addWidget(button)
+        self.unit_buttons.addStretch()
 
     def _build_settings_tab(self) -> QWidget:
         provider = self.PROVIDER
@@ -298,6 +408,8 @@ class PlatformPage(Page):
         self.refresh_btn.setEnabled(True)
         self.busy.emit(False)
 
+        self._fill_units(state.get("units") or [], state.get("linger"))
+
         available = state["available"]
         self.selector.setEnabled(available)
         self.terminal_btn.setEnabled(available)
@@ -321,9 +433,10 @@ class PlatformPage(Page):
         self.selector.clear()
         active_index = 0
         for index, target in enumerate(state["targets"]):
-            label = target.name + (f"  \u2014  {target.address}"
-                                   if target.address else "")
-            self.selector.addItem(label, target.name)
+            # Only the name: an address in the dropdown got cut off mid-path.
+            # The full address is on the line underneath and in the tooltip.
+            self.selector.addItem(target.name, target.name)
+            self.selector.setItemData(index, target.address, Qt.ToolTipRole)
             if target.active:
                 active_index = index
         self.selector.setCurrentIndex(active_index)
@@ -333,8 +446,8 @@ class PlatformPage(Page):
         active = state["active"]
         listing = state["objects"]
         count = len(listing.rows) if listing and not listing.error else 0
-        self.count_label.setText(
-            f"{count} {provider.object_noun_plural.lower()}")
+        from .overview import _count
+        self.count_label.setText(_count(count, provider.object_noun_plural))
 
         info = []
         if active:
@@ -348,6 +461,7 @@ class PlatformPage(Page):
         self.info_label.setText(line)
 
         self._fill_targets(state["targets"])
+        self._fill_resolution(state.get("resolution") or [])
         self._fill_objects(listing)
         self.status.emit(
             f"{provider.name}: {len(state['targets'])} "
@@ -367,6 +481,29 @@ class PlatformPage(Page):
                 item = QTableWidgetItem(text)
                 if target.active:
                     item.setForeground(QColor(c["success"]))
+                table.setItem(r, col, item)
+        table.resizeColumnsToContents()
+
+    def _fill_resolution(self, rows: list) -> None:
+        visible = bool(rows)
+        self.resolution_label.setVisible(visible)
+        self.resolution_table.setVisible(visible)
+        if not visible:
+            return
+        c = self.colors()
+        table = self.resolution_table
+        table.setRowCount(0)
+        for layer, value, wins in rows:
+            r = table.rowCount()
+            table.insertRow(r)
+            for col, text in enumerate([layer, value or "\u2014",
+                                        "\u2705" if wins else ""]):
+                item = QTableWidgetItem(text)
+                if wins:
+                    item.setForeground(QColor(c["success"]))
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
                 table.setItem(r, col, item)
         table.resizeColumnsToContents()
 
@@ -476,7 +613,9 @@ class PlatformPage(Page):
             f"QComboBox {{ font-size: {c['fs_base'] + 3}px; padding: 6px 10px;"
             f" border: 2px solid {c['accent']}; border-radius: 8px; }}")
         for table in (getattr(self, "targets_table", None),
-                      getattr(self, "objects_table", None)):
+                      getattr(self, "objects_table", None),
+                      getattr(self, "units_table", None),
+                      getattr(self, "resolution_table", None)):
             if table is not None:
                 table.setStyleSheet(
                     f"QTableWidget {{ font-size: {c['fs_base'] + 2}px; }}"

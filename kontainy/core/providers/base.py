@@ -132,6 +132,11 @@ class Provider:
     learn_category = ""
     platforms = ("linux", "macos", "windows")
     summary = ""
+    # systemd units that make this technology work: (unit, user_scope, why).
+    # Shown on the Services tab, where each can be started and enabled.
+    services: list = []
+    # Whether rootless use depends on linger (Podman, for one).
+    needs_linger = False
 
     # --- availability -----------------------------------------------------
     def available(self) -> bool:
@@ -175,6 +180,14 @@ class Provider:
     def warning(self) -> str:
         """Something the top bar must say before anyone touches the dropdown."""
         return ""
+
+    def resolution(self) -> list:
+        """How the CLI decides which target to use, highest priority first.
+
+        Rows of (layer, value, wins). Docker's is the one that matters: a
+        set DOCKER_HOST silently beats every context.
+        """
+        return []
 
     # --- objects ----------------------------------------------------------
     def objects(self, target) -> Listing:

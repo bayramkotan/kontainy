@@ -49,7 +49,7 @@ class WindowMenuMixin:
         rescan = QAction("\U0001f501 &Rescan Engines", self)
         rescan.setShortcut("Ctrl+R")
         rescan.setStatusTip("Probe every Docker and Podman socket again")
-        rescan.triggered.connect(lambda: self._menu_refresh("engines"))
+        rescan.triggered.connect(lambda: self._menu_refresh("overview"))
         file_menu.addAction(rescan)
 
         doctor = QAction("\U0001f52c Run &Diagnostics", self)

@@ -34,7 +34,9 @@ class SidebarButton(QPushButton):
 
     def __init__(self, text, icon_text="", parent=None):
         display = f"  {icon_text}  {text}" if icon_text else f"  {text}"
-        super().__init__(display, parent)
+        # Qt reads a single & as "underline the next letter", which turned
+        # "History & Log" into "History _Log". Doubling it prints a real &.
+        super().__init__(display.replace("&", "&&"), parent)
         self.setCheckable(True)
         self.setFixedHeight(44)
         self.setCursor(Qt.PointingHandCursor)

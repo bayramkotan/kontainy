@@ -27,6 +27,10 @@ class KubernetesProvider(Provider):
     target_noun_plural = "Contexts"
     object_noun_plural = "Pods"
     tool_ids = ["kubectl", "k3s", "kind", "minikube", "helm", "k9s", "lens"]
+    services = [
+        ("k3s.service", False, "The k3s server, if this machine runs one."),
+        ("kubelet.service", False, "The node agent on a kubeadm node."),
+    ]
     learn_category = "kubernetes"
     summary = ("A kubeconfig context joins a cluster, a user and a default "
                "namespace. The current context is where every kubectl "
@@ -175,6 +179,13 @@ class LibvirtProvider(Provider):
     tool_ids = ["libvirt", "qemu", "virt-manager", "virtualbox", "multipass",
                 "vagrant"]
     learn_category = "kvm"
+    services = [
+        ("libvirtd.service", False,
+         "The monolithic libvirt daemon, on older setups."),
+        ("virtqemud.service", False,
+         "The modular QEMU driver daemon that replaced libvirtd."),
+        ("virtqemud.socket", False, "Socket activation for virtqemud."),
+    ]
     platforms = ("linux", "macos")
     summary = ("A libvirt connection URI selects which hypervisor and which "
                "set of machines you are looking at. qemu:///system and "
@@ -382,6 +393,8 @@ class IncusProvider(_RemoteProvider):
     icon = "\U0001f9f1"
     binary = "incus"
     tool_ids = ["incus", "lxc", "distrobox", "systemd-nspawn"]
+    services = [("incus.service", False, "The Incus daemon."),
+                ("incus.socket", False, "Socket activation for Incus.")]
     summary = ("A remote is an Incus server: this machine, another host, or "
                "an image server. Instances are full operating systems — "
                "containers or virtual machines.")
@@ -393,6 +406,9 @@ class LxdProvider(_RemoteProvider):
     icon = "\U0001f4e6"
     binary = "lxc"
     tool_ids = ["lxd", "lxc"]
+    services = [("lxd.service", False, "The LXD daemon."),
+                ("snap.lxd.daemon.service", False,
+                 "The LXD daemon when installed as a snap.")]
     summary = ("LXD's client is also called `lxc`. A remote is an LXD "
                "server; instances are system containers or VMs.")
 

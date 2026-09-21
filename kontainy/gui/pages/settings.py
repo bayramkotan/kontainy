@@ -159,6 +159,7 @@ class CatalogPage(Page):
         self.body.addWidget(split, 1)
 
         self.count_label = QLabel()
+        self.count_label.setWordWrap(True)
         self.body.addWidget(self.count_label)
 
         self._apply()

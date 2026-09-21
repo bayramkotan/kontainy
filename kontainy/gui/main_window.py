@@ -17,6 +17,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QScrollArea,
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
     QStackedWidget, QStatusBar, QVBoxLayout, QWidget,
 )
@@ -30,7 +31,7 @@ from ..utils.config import config, log
 from ..utils.workers import stop_all_jobs
 from .pages.containers import ContainersPage
 from .pages.diagnostics import DiagnosticsPage
-from .pages.engines import EnginesPage
+from .pages.overview import OverviewPage
 from .pages.learn import LearnPage
 from .pages.logs import LogPage
 from .pages.preferences import PreferencesPage
@@ -67,7 +68,7 @@ def _platform(provider_id: str):
 # for this operating system are dropped.
 SIDEBAR = [
     ("OVERVIEW", None),
-    (None, EnginesPage),
+    (None, OverviewPage),
     (None, DiagnosticsPage),
 
     ("CONTAINERS", None),
@@ -128,7 +129,7 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self._connect_pages()
         self._apply_theme()
 
-        start = self.config.get("start_page", "engines")
+        start = self.config.get("start_page", "overview")
         index = next((i for i, p in enumerate(PAGE_CLASSES)
                       if p.NAME == start), 0)
         self._switch_page(index)
@@ -205,23 +206,47 @@ class MainWindow(WindowMenuMixin, QMainWindow):
 
         self.stack = QStackedWidget()
         self.pages = {}
+        self.page_list = []
         self.nav_buttons = []
         self.section_labels = []
+
+        # The navigation scrolls on its own. With seven technologies the list
+        # outgrew an 820-pixel-high window and the last entry was cut in half.
+        nav_area = QScrollArea()
+        nav_area.setWidgetResizable(True)
+        nav_area.setFrameShape(QFrame.NoFrame)
+        nav_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        nav_area.setStyleSheet("QScrollArea { background: transparent; }"
+                               "QScrollArea > QWidget > QWidget"
+                               " { background: transparent; }")
+        nav_widget = QWidget()
+        nav = QVBoxLayout(nav_widget)
+        nav.setContentsMargins(0, 0, 0, 0)
+        nav.setSpacing(3)
 
         index = 0
         for section, page_class in SIDEBAR:
             if page_class is None:
                 if self.nav_buttons:
-                    sl.addSpacing(10)
+                    nav.addSpacing(8)
                 label = QLabel(f"   {section}")
                 label.setObjectName("SidebarSection")
-                sl.addWidget(label)
+                nav.addWidget(label)
                 self.section_labels.append(label)
                 continue
 
             page = page_class()
             self.pages[page.NAME] = page
-            self.stack.addWidget(page)
+            self.page_list.append(page)
+            # Every page sits in a scroll area. Qt's stacked widget takes the
+            # widest page's minimum width for the whole window, so one crowded
+            # toolbar used to push the entire application off a 1280-pixel
+            # screen. Now a crowded page scrolls; the window always fits.
+            holder = QScrollArea()
+            holder.setWidgetResizable(True)
+            holder.setFrameShape(QFrame.NoFrame)
+            holder.setWidget(page)
+            self.stack.addWidget(holder)
             page.busy.connect(self._set_busy)
             page.status.connect(self._set_status)
 
@@ -229,11 +254,13 @@ class MainWindow(WindowMenuMixin, QMainWindow):
             button.setToolTip(page.SUBTITLE)
             button.clicked.connect(
                 lambda _checked=False, i=index: self._switch_page(i))
-            sl.addWidget(button)
+            nav.addWidget(button)
             self.nav_buttons.append(button)
             index += 1
 
-        sl.addStretch()
+        nav.addStretch()
+        nav_area.setWidget(nav_widget)
+        sl.addWidget(nav_area, 1)
 
         cs = catalog_stats()
         rs = rule_stats()
@@ -264,8 +291,7 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.setStatusBar(bar)
 
     def _connect_pages(self) -> None:
-        self.pages["engines"].engines_ready.connect(
-            self.pages["containers"].set_endpoints)
+        self.pages["overview"].open_page.connect(self.go)
         self.pages["diagnostics"].open_setting.connect(self._open_setting)
         self.pages["learn"].open_setting.connect(self._open_setting)
         self.pages["preferences"].theme_changed.connect(self.set_theme)
@@ -279,7 +305,7 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.stack.setCurrentIndex(index)
         for i, button in enumerate(self.nav_buttons):
             button.setChecked(i == index)
-        page = self.stack.widget(index)
+        page = self.page_list[index] if index < len(self.page_list) else None
         if page is not None and page.NAME not in self._shown:
             self._shown.add(page.NAME)
             page.on_shown()

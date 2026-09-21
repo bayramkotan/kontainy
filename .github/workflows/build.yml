@@ -526,20 +526,21 @@ jobs:
                        f"{unexpected}")
           PY
 
-      # Publishing is NOT allowed to fail the release. The binaries and the
-      # GitHub release are already out by this point; a PyPI-side
-      # configuration problem — a missing trusted publisher, most often — is
-      # something the maintainer fixes on the website, not something that
-      # should paint a shipped release red. The next step explains it.
+      # This step used to be continue-on-error, so that a PyPI problem would
+      # not "paint a shipped release red". That was a mistake: it made the
+      # job green while nothing was published, and v0.0.3 missed PyPI twice
+      # without anyone noticing. It fails loudly now. The release job does
+      # not depend on this one, so the binaries and the GitHub release still
+      # ship when PyPI is misconfigured — only this job turns red, which is
+      # the truth.
       - name: Publish to PyPI
         id: pypi
-        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
 
       - name: Explain a publishing failure
-        if: steps.pypi.outcome == 'failure'
+        if: failure() && steps.pypi.outcome == 'failure'
         run: |
           {
             echo "## PyPI publish did not run"

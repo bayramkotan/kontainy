@@ -24,6 +24,16 @@ STATE_COLORS = {
 }
 
 
+def _discover_and_collect() -> tuple:
+    """Find every engine, then list its containers — one background job.
+
+    This page used to wait for the Engines page to hand it a list of
+    endpoints. The Engines page is gone, so it discovers on its own.
+    """
+    endpoints = discovery.discover(probe=True)
+    return endpoints, _collect(endpoints)
+
+
 def _collect(endpoints) -> list:
     rows = []
     for ep in endpoints:
@@ -62,9 +72,9 @@ class ContainersPage(Page):
         self.rows = []
         self.filtered = []
 
-        self.add_tool_button("\u2795  New Container", self._new_container,
+        self.add_tool_button("\u2795  New", self._new_container,
                              kind="primary")
-        self.add_tool_button("\U0001f4e6  From Template\u2026",
+        self.add_tool_button("\U0001f4e6  Template\u2026",
                              self._from_template)
         self.refresh_btn = self.add_tool_button(
             "\U0001f504  Refresh", self.refresh)
@@ -121,16 +131,19 @@ class ContainersPage(Page):
             f" font-weight: bold; padding: 9px; }}")
 
     def on_shown(self) -> None:
-        if self.endpoints and not self.rows:
+        if not self.rows:
             self.refresh()
 
     def refresh(self) -> None:
-        if not self.endpoints:
-            self.status.emit("Scan engines first, on the Engines page")
-            return
         self.refresh_btn.setEnabled(False)
         self.busy.emit(True)
-        run_job(CallableJob(_collect, self.endpoints), self._fill, self._failed)
+        self.status.emit("Looking for engines and their containers\u2026")
+        run_job(CallableJob(_discover_and_collect), self._discovered,
+                self._failed)
+
+    def _discovered(self, payload) -> None:
+        self.endpoints, rows = payload
+        self._fill(rows)
 
     def _failed(self, message: str) -> None:
         self.refresh_btn.setEnabled(True)
@@ -218,7 +231,9 @@ class ContainersPage(Page):
     # --- creation ----------------------------------------------------------
     def _new_container(self, preset: str = "") -> None:
         if not self.endpoints:
-            self.status.emit("Scan engines first, on the Engines page")
+            self.endpoints = discovery.discover(probe=True)
+        if not any(e.reachable for e in self.endpoints):
+            self.status.emit("No reachable Docker or Podman engine was found")
             return
         from ..dialogs.create_container import CreateContainerDialog
         dialog = CreateContainerDialog(self.endpoints, self, preset=preset)

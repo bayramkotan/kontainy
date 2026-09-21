@@ -22,6 +22,17 @@ class DockerProvider(Provider):
     summary = ("A context names one Docker endpoint — the local daemon, "
                "Docker Desktop's VM, a remote host over SSH. The active one "
                "is where every docker command goes.")
+    services = [
+        ("docker.service", False, "The Docker daemon itself."),
+        ("docker.socket", False,
+         "Socket activation. While active, stopping docker.service is not "
+         "enough \u2014 the next docker command starts it again."),
+        ("containerd.service", False, "The runtime Docker sits on."),
+    ]
+
+    def resolution(self):
+        from ..discovery import resolve_cli_target
+        return resolve_cli_target().as_rows()
 
     def targets(self) -> list:
         ok, text = cli_text(["docker", "context", "ls", "--format", "{{json .}}"])
@@ -125,6 +136,17 @@ class PodmanProvider(Provider):
     summary = ("A system connection names one Podman service — rootless on "
                "this machine, rootful, a podman machine VM, or a remote host "
                "over SSH. With none defined, podman runs locally.")
+    needs_linger = True
+    services = [
+        ("podman.socket", True,
+         "The rootless API socket. kontainy and podman-remote talk to it."),
+        ("podman.socket", False, "The rootful API socket."),
+        ("podman-auto-update.timer", True,
+         "Performs updates for containers labelled AutoUpdate=registry."),
+        ("podman-restart.service", True,
+         "Restarts --restart=always containers after a reboot; rootless "
+         "Podman has no daemon to do it."),
+    ]
 
     def targets(self) -> list:
         ok, text = cli_text(["podman", "system", "connection", "list",

@@ -72,7 +72,7 @@ DEFAULTS = {
     "language": "en",
 
     # --- General ----------------------------------------------------------
-    "start_page": "engines",
+    "start_page": "overview",
     "confirm_destructive": True,
     "show_command_strip": True,
     "record_history": True,
