@@ -24,27 +24,13 @@ from PySide6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
+from ...core.constants import LANGUAGES, START_PAGES, TERMINALS
 from ...core.elevate import can_elevate, elevation_note
 from ...utils.config import DEFAULTS, config, config_dir, data_dir, log_path
 from ..styles import THEME_OPTIONS
 from .base import Page
 
-LANGUAGES = [
-    ("en", "English"), ("tr", "Türkçe"), ("de", "Deutsch"),
-    ("fr", "Français"), ("es", "Español"), ("it", "Italiano"),
-    ("pt", "Português"), ("ru", "Русский"), ("zh", "中文"),
-    ("ja", "日本語"), ("ar", "العربية"),
-]
 
-TERMINALS = [
-    ("", "Auto-detect"),
-    ("konsole", "Konsole"), ("gnome-terminal", "GNOME Terminal"),
-    ("alacritty", "Alacritty"), ("kitty", "kitty"),
-    ("xfce4-terminal", "Xfce Terminal"), ("foot", "foot"),
-    ("wezterm", "WezTerm"), ("xterm", "xterm"),
-    ("x-terminal-emulator", "System default (Debian)"),
-    ("wt.exe", "Windows Terminal"),
-]
 
 
 class PreferencesPage(Page):
@@ -280,13 +266,8 @@ class PreferencesPage(Page):
                          "history_limit"],
                         "Startup page, confirmations and history."))
 
-        pages = [("engines", "Engines"), ("diagnostics", "Diagnostics"),
-                 ("containers", "Containers"),
-                 ("tools-containers", "Container engines"),
-                 ("tools-kubernetes", "Kubernetes"),
-                 ("tools-vm", "Virtual machines"),
-                 ("catalog", "Config Catalog"), ("learn", "Learn")]
-        self._row(grid, "Open on start", self._bind_combo("start_page", pages))
+        self._row(grid, "Open on start",
+                  self._bind_combo("start_page", list(START_PAGES)))
         self._row(grid, "", self._bind_check(
             "confirm_destructive", "Ask before anything destructive"))
         self._row(grid, "", self._bind_check(

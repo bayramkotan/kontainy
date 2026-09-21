@@ -25,11 +25,20 @@ jobs:
   # construction, config writing, the context chain — which is where every bug
   # found so far actually lived.
   tests:
-    runs-on: ubuntu-latest
+    # Three operating systems, because kontainy ships a binary for each.
+    #
+    # This job used to run on Ubuntu alone, and on 2026-09-20 that let a
+    # Windows-only crash through: os.getuid() does not exist on Windows,
+    # discovery called it unguarded, and discovery runs when the Engines
+    # page opens. The Windows exe would have died at startup while every
+    # check stayed green. A binary built for a platform must have its tests
+    # run on that platform.
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # The oldest supported version and the one Bayram develops on.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The oldest supported version and a current one.
         # pyproject declares requires-python >= 3.10.
         python-version: ["3.10", "3.13"]
     steps:

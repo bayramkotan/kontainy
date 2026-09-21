@@ -128,12 +128,14 @@ def collect(probe: bool = True) -> Environment:
             env.docker_real_path = env.docker_binary
     env.podman_binary = shutil.which("podman") or ""
 
-    try:
-        env.uid = os.getuid()
-        env.username = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
-    except AttributeError:                                   # Windows
-        env.uid = 0
-        env.username = os.environ.get("USERNAME", "")
+    # os.getuid() does not exist on Windows. The old fallback set uid = 0,
+    # which told every rule the user was root — the opposite of the truth,
+    # and exactly the wrong way to be wrong in a tool that decides when to
+    # ask for elevation. -1 means "no POSIX uid here".
+    getuid = getattr(os, "getuid", None)
+    env.uid = getuid() if getuid else -1
+    env.username = (os.environ.get("USER") or os.environ.get("LOGNAME")
+                    or os.environ.get("USERNAME") or "")
 
     groups = _run(["id", "-nG"])
     env.user_groups = groups.split() if groups else []

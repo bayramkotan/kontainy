@@ -16,3 +16,37 @@ APP_REPO = "https://github.com/bayramkotan/kontainy"
 
 # Must match [project.scripts] in pyproject.toml.
 CLI_NAMES = ("kontainy", "ky", "kty")
+
+# ---------------------------------------------------------------------------
+#  Data the Preferences page offers, kept here rather than in the GUI module.
+#
+#  A list of language codes needs no widget toolkit, and putting it beside the
+#  widgets meant a test could not read it without importing Qt. CI runs the
+#  suite with PySide6 stubbed, so that import was the difference between
+#  passing locally and failing on the runner.
+# ---------------------------------------------------------------------------
+LANGUAGES = [
+    ("en", "English"), ("tr", "Türkçe"), ("de", "Deutsch"),
+    ("fr", "Français"), ("es", "Español"), ("it", "Italiano"),
+    ("pt", "Português"), ("ru", "Русский"), ("zh", "中文"),
+    ("ja", "日本語"), ("ar", "العربية"),
+]
+
+TERMINALS = [
+    ("", "Auto-detect"),
+    ("konsole", "Konsole"), ("gnome-terminal", "GNOME Terminal"),
+    ("alacritty", "Alacritty"), ("kitty", "kitty"),
+    ("xfce4-terminal", "Xfce Terminal"), ("foot", "foot"),
+    ("wezterm", "WezTerm"), ("xterm", "xterm"),
+    ("x-terminal-emulator", "System default (Debian)"),
+    ("wt.exe", "Windows Terminal"),
+]
+
+START_PAGES = [
+    ("engines", "Engines"), ("diagnostics", "Diagnostics"),
+    ("containers", "Containers"),
+    ("tools-containers", "Container engines"),
+    ("tools-kubernetes", "Kubernetes"),
+    ("tools-vm", "Virtual machines"),
+    ("catalog", "Config Catalog"), ("learn", "Learn"),
+]

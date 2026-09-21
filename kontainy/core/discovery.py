@@ -71,31 +71,47 @@ class CliTarget:
 
 
 # ---------------------------------------------------------------------------
-#  Aday soketler
+#  Candidate sockets
 # ---------------------------------------------------------------------------
 def _xdg_runtime() -> str:
-    return os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    """The per-user runtime directory, or "" where there is no such thing.
+
+    os.getuid() does not exist on Windows. Calling it unguarded here crashed
+    discovery — and so the Engines page, and so the Windows build at startup —
+    and CI never saw it because the test job only ran on Ubuntu. Found by
+    running the suite on Windows on 2026-09-20.
+    """
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return runtime
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return ""
+    return f"/run/user/{getuid()}"
 
 
 DOCKER_SOCKET_CANDIDATES = [
     ("/run/docker.sock",                      "local daemon"),
     ("/var/run/docker.sock",                  "local daemon (legacy path)"),
     (str(Path.home() / ".docker/desktop/docker.sock"), "Docker Desktop for Linux"),
-    (str(Path.home() / ".docker/run/docker.sock"),     "Docker Desktop (yeni yol)"),
+    (str(Path.home() / ".docker/run/docker.sock"),     "Docker Desktop (new path)"),
     (str(Path.home() / ".rd/docker.sock"),    "Rancher Desktop"),
     (str(Path.home() / ".colima/default/docker.sock"), "Colima"),
 ]
 
 
 def podman_socket_candidates() -> list:
-    return [
-        (f"{_xdg_runtime()}/podman/podman.sock", "Podman rootless (user socket)"),
-        ("/run/podman/podman.sock",              "Podman rootful (system socket)"),
-    ]
+    out = []
+    runtime = _xdg_runtime()
+    if runtime:
+        out.append((f"{runtime}/podman/podman.sock",
+                    "Podman rootless (user socket)"))
+    out.append(("/run/podman/podman.sock", "Podman rootful (system socket)"))
+    return out
 
 
 # ---------------------------------------------------------------------------
-#  Context dosyaları
+#  Context files
 # ---------------------------------------------------------------------------
 def docker_cli_config() -> dict:
     text = fs.read_text(Path.home() / ".docker" / "config.json")

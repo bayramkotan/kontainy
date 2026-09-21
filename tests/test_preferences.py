@@ -53,7 +53,7 @@ def test_all_sections_present():
 
 
 def test_eleven_languages_are_offered():
-    from kontainy.gui.pages.preferences import LANGUAGES
+    from kontainy.core.constants import LANGUAGES
     assert len(LANGUAGES) == 11
     codes = [code for code, _ in LANGUAGES]
     assert len(codes) == len(set(codes))
@@ -64,3 +64,14 @@ def test_show_command_cannot_be_turned_off():
     """Nothing runs unseen. An option to disable that would defeat the tool."""
     assert DEFAULTS["always_show_command"] is True
     assert "always_show_command" not in _bound_keys()
+
+
+def test_gui_modules_import_without_qt():
+    """Every page module must import under the CI stub. This is the test
+    that would have caught the 0.0.3 failure before a tag was pushed."""
+    import importlib
+    for name in ("kontainy.gui.pages.base", "kontainy.gui.pages.preferences",
+                 "kontainy.gui.pages.tools", "kontainy.gui.pages.settings",
+                 "kontainy.gui.pages.engines", "kontainy.gui.dialogs.about",
+                 "kontainy.gui.dialogs.run_command"):
+        importlib.import_module(name)
