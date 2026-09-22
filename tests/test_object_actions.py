@@ -163,9 +163,13 @@ def test_network_xml_for_nat_and_isolated():
 
 
 def test_libvirt_offers_a_networks_section():
-    sections = platforms.LibvirtProvider().sections()
-    assert [s.id for s in sections] == ["networks"]
-    net = sections[0]
+    # On Windows the same provider also carries a Backend tab for the WSL
+    # distribution it runs in, so the list is not the same everywhere. The
+    # first version of this test asserted the Linux list exactly and failed
+    # the Windows CI job for a correct result.
+    sections = {s.id: s for s in platforms.LibvirtProvider().sections()}
+    assert "networks" in sections
+    net = sections["networks"]
     acts = net.row_actions(base.Target("system", "qemu:///system"),
                            {"name": "default", "state": "inactive",
                             "autostart": "no"})
