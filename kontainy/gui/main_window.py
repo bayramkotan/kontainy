@@ -42,7 +42,7 @@ from .pages.platform import make_platform_page
 from .pages.tools import InstallPage
 from .styles import get_colors, get_theme
 from .window_menu import WindowMenuMixin
-from .widgets import SidebarButton
+from .widgets import LabelWrapPolicy, SidebarButton
 
 # The sidebar is grouped. A flat list of pages stopped being readable once
 # KVM, LXC and Kubernetes arrived, and "where is KVM" was the first thing
@@ -81,6 +81,7 @@ SIDEBAR = [
 
     ("VIRTUALISATION", None),
     (None, _platform("libvirt")),
+    (None, _platform("hyperv")),
     (None, _platform("wsl")),
 
     ("SYSTEM CONTAINERS", None),
@@ -122,6 +123,10 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.config = config()
         self._applying_theme = False
         self._shown = set()
+
+        # Before any widget exists, so every label is created under it.
+        self._label_policy = LabelWrapPolicy(self)
+        QApplication.instance().installEventFilter(self._label_policy)
 
         self._setup_window(version)
         self._setup_ui()
@@ -197,6 +202,8 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         sl.addWidget(self.logo_label)
 
         self.version_label = QLabel(f"      v{APP_VERSION}")
+        self.version_label.setProperty("noWrap", True)
+        self.logo_label.setProperty("noWrap", True)
         sl.addWidget(self.version_label)
 
         self.tagline_label = QLabel(f"      {APP_TAGLINE}")
@@ -287,6 +294,7 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.catalog_label = QLabel(
             f"catalogue {cs['total']} · user scope "
             f"{cs['user_scope']} · gotchas {cs['gotchas']}")
+        self.catalog_label.setProperty("noWrap", True)
         bar.addPermanentWidget(self.catalog_label)
         self.setStatusBar(bar)
 

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...utils.config import config, history, log
+from ..widgets import FlowLayout
 from ..styles import _strip_bg, get_colors
 
 
@@ -39,6 +40,12 @@ class CommandStrip(QFrame):
         self.label = QLabel("$ \u2014")
         self.label.setObjectName("CommandText")
         self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # Long commands wrap instead of widening the page. A single-line
+        # label took the width of the whole command, and one PowerShell
+        # pipeline on the Hyper-V page pushed its page to 2172 pixels. The
+        # Copy button always copies the full command, wrapped or not.
+        self.label.setWordWrap(True)
+        self.label.setMinimumWidth(120)
         row.addWidget(self.label, 1)
 
         self.copy_btn = QPushButton("Copy")
@@ -103,7 +110,8 @@ class Page(QWidget):
             self.subheader.setWordWrap(True)
             outer.addWidget(self.subheader)
 
-        self.toolbar = QHBoxLayout()
+        # Wraps onto a second line instead of widening the page.
+        self.toolbar = FlowLayout()
         self.toolbar.setSpacing(8)
         outer.addLayout(self.toolbar)
 

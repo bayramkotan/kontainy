@@ -27,6 +27,7 @@ def restore(monkeypatch):
 def test_windows_shows_wsl_and_hides_libvirt(monkeypatch):
     names = _sidebar_on(monkeypatch, "windows")
     assert "platform-wsl" in names
+    assert "platform-hyperv" in names
     assert "platform-libvirt" not in names
     assert "platform-docker" in names and "platform-kubernetes" in names
 
@@ -35,6 +36,7 @@ def test_linux_shows_libvirt_and_hides_wsl(monkeypatch):
     names = _sidebar_on(monkeypatch, "linux")
     assert "platform-libvirt" in names
     assert "platform-wsl" not in names
+    assert "platform-hyperv" not in names
     assert "platform-incus" in names
 
 

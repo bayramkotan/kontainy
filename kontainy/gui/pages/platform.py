@@ -36,6 +36,7 @@ from ...core.providers.base import socket_kind
 from ...core.catalog import ALL_SETTINGS
 from ...core.terminal import describe, open_terminal
 from ...utils.workers import CallableJob, run_job
+from ..widgets import FlowLayout
 from .base import Page
 
 
@@ -62,7 +63,11 @@ def _probe(provider) -> dict:
     targets = provider.targets() if available else []
     active = next((t for t in targets if t.active), None)
     units = []
-    for unit, user, why in provider.services:
+    # systemd exists only on Linux. On Windows every probe failed with
+    # "command not found" and the Services tab would show nothing useful;
+    # the probes also slowed shutdown enough to matter.
+    services = provider.services if reg.OS_KIND == "linux" else []
+    for unit, user, why in services:
         state = act._unit_property(unit, user, "is-active")
         enabled = act._unit_property(unit, user, "is-enabled")
         units.append(act.Unit(name=unit, user=user, state=state,
@@ -209,7 +214,12 @@ class PlatformPage(Page):
             self.subheader.hide()
 
         # --- top bar ---
-        bar = QHBoxLayout()
+        # Name and dropdown stay together; every other piece may move to a
+        # second line. As one QHBoxLayout the bar set the page's width, and
+        # with Windows' wider fonts that overflowed.
+        head = QWidget()
+        bar = QHBoxLayout(head)
+        bar.setContentsMargins(0, 0, 0, 0)
         bar.setSpacing(12)
         self.name_label = QLabel(f"{provider.icon}  {provider.target_noun}:")
         self.name_label.setObjectName("platformName")
@@ -222,10 +232,11 @@ class PlatformPage(Page):
             f"shows the command that switches to it before anything runs.")
         self.selector.currentIndexChanged.connect(self._selector_changed)
         bar.addWidget(self.selector)
+        self.toolbar.addWidget(head)
 
         self.version_label = QLabel("")
         self.version_label.setObjectName("platformVersion")
-        bar.addWidget(self.version_label)
+        self.toolbar.addWidget(self.version_label)
 
         self.terminal_btn = QPushButton(">_  Open Terminal")
         self.terminal_btn.setCursor(Qt.PointingHandCursor)
@@ -233,19 +244,23 @@ class PlatformPage(Page):
             "Opens a terminal already pointed at the selected target, "
             "without changing anything global.")
         self.terminal_btn.clicked.connect(self._open_terminal)
-        bar.addWidget(self.terminal_btn)
+        self.toolbar.addWidget(self.terminal_btn)
 
         self.count_label = QLabel("")
-        bar.addWidget(self.count_label)
-        bar.addStretch()
+        self.toolbar.addWidget(self.count_label)
+
+        # Short one-line labels in a horizontal bar stay on one line. A
+        # wrapping label gets a narrower preferred width than its text, so
+        # "Docker version 29.8.1" broke onto two lines with space to spare.
+        for label in (self.name_label, self.version_label, self.count_label):
+            label.setProperty("noWrap", True)
 
         self.refresh_btn = QPushButton("\u21bb")
         self.refresh_btn.setObjectName("secondary")
         self.refresh_btn.setToolTip("Re-read everything")
         self.refresh_btn.setFixedWidth(44)
         self.refresh_btn.clicked.connect(self.refresh)
-        bar.addWidget(self.refresh_btn)
-        self.toolbar.addLayout(bar)
+        self.toolbar.addWidget(self.refresh_btn)
 
         # --- info line under the bar ---
         self.info_label = QLabel("")
@@ -265,7 +280,7 @@ class PlatformPage(Page):
                              f"{section.icon}  {section.title}")
         self.install_tab = self._build_install_tab()
         self.tabs.addTab(self.install_tab, "\U0001f4e5  Install")
-        if provider.services:
+        if provider.services and reg.OS_KIND == "linux":
             self.tabs.addTab(self._build_services_tab(), "\U0001f6e0  Services")
         if shellprofile.VARIABLES.get(provider.id):
             self.tabs.addTab(self._build_shell_tab(), "\U0001f41a  Shell")
@@ -335,9 +350,9 @@ class PlatformPage(Page):
         self.objects_table = self._table(["\u2014"])
         self.objects_table.currentCellChanged.connect(self._object_selected)
         layout.addWidget(self.objects_table, 1)
-        self.object_buttons = QHBoxLayout()
+        self.object_buttons = FlowLayout()
         layout.addLayout(self.object_buttons)
-        self.bulk_buttons = QHBoxLayout()
+        self.bulk_buttons = FlowLayout()
         layout.addLayout(self.bulk_buttons)
         return tab
 
@@ -362,9 +377,9 @@ class PlatformPage(Page):
             ["Unit", "Scope", "State", "At boot", "What it does"])
         self.units_table.currentCellChanged.connect(self._unit_selected)
         layout.addWidget(self.units_table, 1)
-        self.unit_buttons = QHBoxLayout()
+        self.unit_buttons = FlowLayout()
         layout.addLayout(self.unit_buttons)
-        self.linger_row = QHBoxLayout()
+        self.linger_row = FlowLayout()
         layout.addLayout(self.linger_row)
         return tab
 
@@ -700,7 +715,7 @@ class PlatformPage(Page):
         layout.addWidget(note)
         table = self._table(["\u2014"])
         layout.addWidget(table, 1)
-        row_buttons = QHBoxLayout()
+        row_buttons = FlowLayout()
         layout.addLayout(row_buttons)
         bottom = QHBoxLayout()
         if section.create is not None:
@@ -789,7 +804,7 @@ class PlatformPage(Page):
         self.shell_why = QLabel("")
         self.shell_why.setWordWrap(True)
         layout.addWidget(self.shell_why)
-        self.shell_buttons = QHBoxLayout()
+        self.shell_buttons = FlowLayout()
         layout.addLayout(self.shell_buttons)
         return tab
 

@@ -48,6 +48,9 @@ class CatalogPage(Page):
         self.reload_btn = self.add_tool_button(
             "\U0001f504  Read values", self.refresh, kind="primary")
         self.search_box = QLineEdit()
+        # In a wrapping toolbar a line edit shrinks to its size hint; keep
+        # the placeholder readable.
+        self.search_box.setMinimumWidth(260)
         self.search_box.setPlaceholderText(
             "Search: key, title, description, CLI flag, tag\u2026")
         self.search_box.textChanged.connect(self._apply)

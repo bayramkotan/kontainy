@@ -95,6 +95,44 @@ def cli_stats() -> int:
     return 0
 
 
+# The system libraries Qt needs for any window at all, by distribution.
+# PySide6 bundles Qt itself but not these; a minimal install or a container
+# image often lacks them, and the raw error is a bare "libEGL.so.1: cannot
+# open shared object file". Found when the CI runner hit exactly that.
+QT_SYSTEM_PACKAGES = {
+    "debian": "sudo apt install libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3",
+    "fedora": "sudo dnf install mesa-libEGL mesa-libGL libxkbcommon fontconfig dbus-libs",
+    "arch": "sudo pacman -S --needed libglvnd libxkbcommon fontconfig dbus",
+    "suse": "sudo zypper install libEGL1 libGL1 libxkbcommon0 fontconfig libdbus-1-3",
+    "alpine": "sudo apk add mesa-egl mesa-gl libxkbcommon fontconfig dbus-libs",
+}
+
+
+def qt_missing_message(exc: Exception) -> str:
+    """Turn a failed Qt import into something a person can act on."""
+    text = str(exc)
+    if "No module named" in text:
+        return (f"kontainy could not start its window: {text}\n\n"
+                f"PySide6 is not installed in this environment:\n"
+                f"    pip install PySide6\n\n"
+                f"The command-line modes still work: ky --scan, ky --doctor, "
+                f"ky --stats")
+    from kontainy.core.registry import OS_FAMILY, OS_KIND, OS_LABEL
+    lines = [f"kontainy could not start its window: {text}", "",
+             "Qt is installed, but a system library it needs is missing."]
+    if OS_KIND == "linux":
+        command = QT_SYSTEM_PACKAGES.get(OS_FAMILY)
+        if command:
+            lines += [f"On {OS_LABEL}, install them with:", f"    {command}"]
+        else:
+            lines += ["Install your distribution's packages for EGL, OpenGL,",
+                      "xkbcommon, fontconfig and D-Bus. For example:"]
+            lines += [f"    {c}" for c in QT_SYSTEM_PACKAGES.values()]
+    lines += ["", "The command-line modes still work: ky --scan, ky --doctor, "
+                  "ky --stats"]
+    return "\n".join(lines)
+
+
 def main() -> int:
     if "--version" in sys.argv or "-V" in sys.argv:
         from kontainy.core.constants import APP_NAME, APP_VERSION
@@ -110,7 +148,11 @@ def main() -> int:
     if "--stats" in sys.argv:
         return cli_stats()
 
-    from PySide6.QtWidgets import QApplication
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError as exc:
+        print(qt_missing_message(exc), file=sys.stderr)
+        return 1
 
     from kontainy.core.constants import APP_NAME, APP_VERSION
     from kontainy.gui.main_window import MainWindow

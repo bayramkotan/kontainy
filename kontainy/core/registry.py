@@ -338,6 +338,18 @@ VM_TOOLS = [
       learn_category="kvm",
       docs="https://virt-manager.org/"),
 
+    T("hyperv", "Hyper-V", "Virtual machines",
+      "Windows' own hypervisor, built into Pro, Enterprise and Education. "
+      "Managed entirely from PowerShell.",
+      binaries=["vmconnect"],
+      windows=("powershell -NoProfile -Command Enable-WindowsOptionalFeature "
+               "-Online -FeatureName Microsoft-Hyper-V -All"),
+      docs="https://learn.microsoft.com/virtualization/hyper-v-on-windows/",
+      note="Not available on Windows Home. Enabling it needs a restart, and "
+           "while it is on, VirtualBox and VMware run on top of it through "
+           "the Windows Hypervisor Platform — slower, and some older "
+           "versions refuse to start at all."),
+
     T("virtualbox", "VirtualBox", "Virtual machines",
       "Oracle's type-2 hypervisor. Manageable from the command line with "
       "VBoxManage.",
@@ -485,6 +497,7 @@ _ONLY_ON = {
     "cockpit": ("linux",), "k3s": ("linux",),
     "containerd": ("linux", "macos"), "buildah": ("linux", "macos"),
     "skopeo": ("linux", "macos"),
+    "hyperv": ("windows",),
 }
 for _tool in ALL_TOOLS:
     if _tool.id in _ONLY_ON:

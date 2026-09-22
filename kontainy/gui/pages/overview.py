@@ -45,7 +45,7 @@ def _summarise(provider) -> dict:
             out["error"] = listing.error.splitlines()[0][:120]
         else:
             out["objects"] = len(listing.rows)
-    for unit, user, _why in provider.services:
+    for unit, user, _why in (provider.services if OS_KIND == "linux" else []):
         if act._unit_property(unit, user, "is-enabled") == "not-found":
             continue
         out["services_total"] += 1

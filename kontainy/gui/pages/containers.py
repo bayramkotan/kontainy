@@ -87,6 +87,7 @@ class ContainersPage(Page):
         self.search = QLineEdit()
         self.search.setPlaceholderText("Filter: name, image, engine, state\u2026")
         self.search.textChanged.connect(self._apply_filter)
+        self.search.setMinimumWidth(240)
         self.toolbar.addWidget(self.search, 1)
 
         self.count_label = QLabel("—")

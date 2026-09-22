@@ -533,7 +533,18 @@ jobs:
       # and actually start kontainy from it. The test suite runs from the
       # source tree, so it can never see what the wheel left out; this can.
       - name: Run the installed wheel
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: |
+          # The system libraries Qt needs to open any window, including an
+          # offscreen one. PySide6 bundles Qt but not these, and the runner
+          # does not have libEGL — which failed 0.0.5 here with
+          # "libEGL.so.1: cannot open shared object file" while the wheel
+          # itself was complete. List taken from ldd on libQt6Gui.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
           python -m venv /tmp/wheel-check
           /tmp/wheel-check/bin/pip install -q dist/*.whl
           cd /tmp

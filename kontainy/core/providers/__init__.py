@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .base import Field, Listing, Provider, Target
 from .containers import DockerProvider, PodmanProvider
+from .hyperv import HyperVProvider
 from .platforms import (IncusProvider, KubernetesProvider, LibvirtProvider,
                         LxdProvider, WslProvider, parse_wsl_list)
 
@@ -17,6 +18,7 @@ PROVIDERS = [
     PodmanProvider(),
     KubernetesProvider(),
     LibvirtProvider(),
+    HyperVProvider(),
     IncusProvider(),
     LxdProvider(),
     WslProvider(),

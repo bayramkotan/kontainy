@@ -92,9 +92,28 @@ def active_job_count() -> int:
     return len(_LIVE_JOBS)
 
 
-def stop_all_jobs(wait_ms: int = 3000) -> None:
-    """Kapanışta çalışan tüm iş parçacıklarını düzgünce sonlandırır."""
+def stop_all_jobs(timeout_ms: int = 25000) -> int:
+    """Wait for background jobs at shutdown; return how many are still running.
+
+    The first version waited three seconds per job and then cleared the list
+    whatever had happened. A job still running — a PowerShell probe of
+    Hyper-V takes longer than that on Windows — lost its last reference, was
+    garbage-collected mid-flight, and Qt aborted with "QThread: Destroyed
+    while thread is still running", the same crash this module was written
+    to prevent. It was seen at the end of a test run on Windows.
+
+    Now: one overall deadline, generous enough for every CLI timeout used in
+    kontainy (the longest is 20 seconds), and a job that is still running is
+    NEVER dropped from the list. Keeping the reference is what keeps Qt from
+    destroying a live thread; the job finishes on its own and releases itself
+    through thread.finished as usual.
+    """
+    import time as _time
+    deadline = _time.monotonic() + timeout_ms / 1000.0
     for thread, _job in list(_LIVE_JOBS):
         thread.quit()
-        thread.wait(wait_ms)
-    _LIVE_JOBS.clear()
+        remaining = int(max(0.0, deadline - _time.monotonic()) * 1000)
+        thread.wait(remaining)
+    still_running = [(t, j) for t, j in _LIVE_JOBS if t.isRunning()]
+    _LIVE_JOBS[:] = still_running
+    return len(still_running)
