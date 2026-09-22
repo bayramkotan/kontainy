@@ -47,7 +47,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install pytest
-        run: python -m pip install --upgrade pip pytest
+        # pyyaml lets tests/test_workflow.py read this file. Without it
+        # those checks would be skipped here silently — a check that never
+        # runs is how two releases broke.
+        run: python -m pip install --upgrade pip pytest pyyaml
       - name: Run tests
         run: python -m pytest -q
 
@@ -529,6 +532,23 @@ jobs:
           print(f"✅ all {len(source)} source modules are in the wheel")
           PY
 
+          # Only kontainy/ and its .dist-info at the top of the wheel. This
+          # check used to sit here, was pushed to the end of the next step
+          # when that step was inserted in 0.0.5, and ran there after
+          # `cd /tmp`, where there is no dist/ — failing 0.0.6's publish.
+          python - <<'PY'
+          import os, sys, zipfile
+          wheel = next(f for f in os.listdir("dist") if f.endswith(".whl"))
+          names = zipfile.ZipFile(f"dist/{wheel}").namelist()
+          tops = sorted({n.split("/")[0] for n in names})
+          print("top-level entries:", tops)
+          unexpected = [t for t in tops
+                        if t != "kontainy" and not t.endswith(".dist-info")]
+          if unexpected:
+              sys.exit(f"::error::wheel ships unexpected top-level entries: "
+                       f"{unexpected}")
+          PY
+
       # Install the wheel into a clean environment, away from the checkout,
       # and actually start kontainy from it. The test suite runs from the
       # source tree, so it can never see what the wheel left out; this can.
@@ -547,30 +567,27 @@ jobs:
             libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
           python -m venv /tmp/wheel-check
           /tmp/wheel-check/bin/pip install -q dist/*.whl
-          cd /tmp
-          /tmp/wheel-check/bin/ky --version
-          /tmp/wheel-check/bin/ky --stats | head -3
-          set +e
-          QT_QPA_PLATFORM=offscreen timeout 20 /tmp/wheel-check/bin/ky
-          code=$?
-          set -e
-          if [ "$code" != 124 ]; then
-            echo "::error::the installed wheel exited with code $code instead of staying open"
-            exit 1
-          fi
+          # Leave the checkout in a subshell, so nothing appended to this
+          # step later can end up running from the wrong directory — which
+          # is exactly how 0.0.6's publish failed.
+          (
+            cd /tmp
+            /tmp/wheel-check/bin/ky --version
+            /tmp/wheel-check/bin/ky --stats | head -3
+            set +e
+            QT_QPA_PLATFORM=offscreen timeout 20 /tmp/wheel-check/bin/ky \
+              > /tmp/ky-run.log 2>&1
+            code=$?
+            set -e
+            # Qt's offscreen plugin prints one line per window resize; drop
+            # those, show anything else.
+            grep -v "propagateSizeHints" /tmp/ky-run.log || true
+            if [ "$code" != 124 ]; then
+              echo "::error::the installed wheel exited with code $code instead of staying open"
+              exit 1
+            fi
+          )
           echo "✅ the installed wheel opens and stays up"
-          python - <<'PY'
-          import os, sys, zipfile
-          wheel = next(f for f in os.listdir("dist") if f.endswith(".whl"))
-          names = zipfile.ZipFile(f"dist/{wheel}").namelist()
-          tops = sorted({n.split("/")[0] for n in names})
-          print("top-level entries:", tops)
-          unexpected = [t for t in tops
-                        if t != "kontainy" and not t.endswith(".dist-info")]
-          if unexpected:
-              sys.exit(f"::error::wheel ships unexpected top-level entries: "
-                       f"{unexpected}")
-          PY
 
       # This step used to be continue-on-error, so that a PyPI problem would
       # not "paint a shipped release red". That was a mistake: it made the
