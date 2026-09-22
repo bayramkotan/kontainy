@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontainy"
-version = "0.0.5"
+version = "0.0.6"
 description = "Every Docker and Podman setting, in one interface - a desktop manager for containers, with diagnostics and built-in learning"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"

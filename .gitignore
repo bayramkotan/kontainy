@@ -27,3 +27,6 @@ Thumbs.db
 # Handoff ve TODO — repoya girmez
 kontainy_Handoff.md
 KONTAINY_TODO.md
+
+# PyInstaller writes this on every build; build.py is the source of truth.
+*.spec

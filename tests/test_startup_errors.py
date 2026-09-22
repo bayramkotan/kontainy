@@ -52,3 +52,33 @@ def test_main_returns_1_instead_of_a_traceback(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "could not start its window" in err
     assert "Traceback" not in err
+
+
+def test_a_closed_pipe_ends_quietly():
+    """`ky --stats | head -3` printed a traceback once head had its lines.
+
+    The reader must be gone BEFORE kontainy writes, or there is nothing to
+    catch: the output is flushed in one piece at exit, so a test that reads
+    a line first finds everything already written. The first two versions of
+    this test passed with the fix removed for exactly that reason. The child
+    waits until the pipe has been closed, then runs.
+
+    stderr is read directly rather than through communicate(): on Windows
+    communicate() starts a reader thread for every pipe, including the
+    stdout closed here, which fails with "read of closed file".
+    """
+    import pathlib
+    import subprocess
+    code = ("import sys, time; time.sleep(0.5)\n"
+            "sys.argv = ['ky', '--stats']\n"
+            "from kontainy.__main__ import main\n"
+            "raise SystemExit(main())")
+    proc = subprocess.Popen([sys.executable, "-c", code],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            cwd=str(pathlib.Path(__file__).resolve().parents[1]))
+    proc.stdout.close()             # the reader leaves before a word is written
+    err = proc.stderr.read()
+    proc.stderr.close()
+    proc.wait(timeout=30)
+    assert b"Traceback" not in err, err.decode(errors="replace")
+    assert proc.returncode == 0

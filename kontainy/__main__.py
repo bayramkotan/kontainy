@@ -23,6 +23,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
 
 
@@ -133,6 +134,33 @@ def qt_missing_message(exc: Exception) -> str:
     return "\n".join(lines)
 
 
+def _cli(command) -> int:
+    """Run a command-line mode, quietly stopping if the reader goes away.
+
+    `ky --stats | head -3` closed the pipe after three lines, the next print
+    raised BrokenPipeError, and a traceback landed in the terminal — and in
+    the CI log, which pipes exactly that. A closed pipe is the reader saying
+    it has enough; the Unix convention is to stop without a word.
+    """
+    import errno
+    try:
+        code = command()
+        sys.stdout.flush()
+        return code
+    except OSError as exc:
+        # POSIX reports a vanished reader as EPIPE (BrokenPipeError).
+        # Windows usually reports it as EINVAL, "Invalid argument", when the
+        # buffered output is flushed. Anything else is a real error.
+        if not (isinstance(exc, BrokenPipeError)
+                or exc.errno in (errno.EPIPE, errno.EINVAL)):
+            raise
+        # Point stdout at nothing so the interpreter's own flush at exit
+        # does not raise the same error a second time.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 0
+
+
 def main() -> int:
     if "--version" in sys.argv or "-V" in sys.argv:
         from kontainy.core.constants import APP_NAME, APP_VERSION
@@ -141,12 +169,10 @@ def main() -> int:
     if "--help" in sys.argv or "-h" in sys.argv:
         print(__doc__)
         return 0
-    if "--scan" in sys.argv:
-        return cli_scan()
-    if "--doctor" in sys.argv:
-        return cli_doctor()
-    if "--stats" in sys.argv:
-        return cli_stats()
+    for flag, command in (("--scan", cli_scan), ("--doctor", cli_doctor),
+                          ("--stats", cli_stats)):
+        if flag in sys.argv:
+            return _cli(command)
 
     try:
         from PySide6.QtWidgets import QApplication

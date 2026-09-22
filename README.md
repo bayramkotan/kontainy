@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Every Docker and Podman setting, in one interface</strong><br>
-  <sub>Docker, Podman, Kubernetes, KVM, Incus, LXD and WSL — every target selectable, every setting explained, every command shown before it runs</sub>
+  <sub>Docker, Podman, Kubernetes, KVM, Hyper-V, Incus, LXD and WSL — every target selectable, every setting explained, every command shown before it runs</sub>
 </p>
 
 <p align="center">
@@ -85,7 +85,8 @@ at the top, the active one selected, and tabs underneath.
 | 🐳 **Docker** | contexts | containers |
 | 🦭 **Podman** | system connections | containers |
 | ☸ **Kubernetes** | kubeconfig contexts | pods |
-| 🖥 **KVM / libvirt** | connection URIs | virtual machines |
+| 🖥 **KVM / libvirt** *(Linux, macOS)* | connection URIs | virtual machines, networks |
+| 🪟 **Hyper-V** *(Windows)* | hosts, local and remote | virtual machines, virtual switches |
 | 🧱 **Incus** · 📦 **LXD** | remotes | instances |
 | 🪟 **WSL** *(Windows)* | distributions — including Docker Desktop's own Linux | distributions |
 
@@ -99,7 +100,7 @@ profile**. The line under the dropdown says what the active target really is
 Desktop VM*, *remote over SSH*.
 
 Technologies that cannot exist on your operating system are not shown:
-there is no KVM page on Windows and no WSL page on Linux.
+there is no KVM page on Windows, and no Hyper-V or WSL page on Linux.
 
 ## 🎓 Educational by Design
 
