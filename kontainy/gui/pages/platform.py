@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from ...core import actions as act
 from ...core import registry as reg
 from ...core import shellprofile
+from ...core.providers.base import count_label as base_count
 from ...core.providers.base import socket_kind
 from ...core.catalog import ALL_SETTINGS
 from ...core.terminal import describe, open_terminal
@@ -285,6 +286,10 @@ class PlatformPage(Page):
         if shellprofile.VARIABLES.get(provider.id):
             self.tabs.addTab(self._build_shell_tab(), "\U0001f41a  Shell")
         self.tabs.addTab(self._build_settings_tab(), "\u2699  Settings")
+        # A tab's contents are read the first time it is opened. Without
+        # this the Install tab stayed empty on every platform: an embedded
+        # panel never receives on_shown, which is what refreshes a page.
+        self.tabs.currentChanged.connect(self._tab_opened)
         self.body.addWidget(self.tabs, 1)
 
     def _table(self, headers: list) -> QTableWidget:
@@ -358,8 +363,10 @@ class PlatformPage(Page):
 
     def _build_install_tab(self) -> QWidget:
         from .tools import embedded_tools
-        self.tools_panel = embedded_tools(self.PROVIDER.tool_ids,
-                                          self.PROVIDER.id)
+        host = self.PROVIDER.host()
+        self.tools_panel = embedded_tools(
+            self.PROVIDER.tool_ids, self.PROVIDER.id,
+            host if host is not None and host.is_wsl else None)
         self.tools_panel.status.connect(self.status.emit)
         return self.tools_panel
 
@@ -486,6 +493,11 @@ class PlatformPage(Page):
             layout.addWidget(note, 1)
         return tab
 
+    def _tab_opened(self, index: int) -> None:
+        widget = self.tabs.widget(index)
+        if widget is self.install_tab and not getattr(widget, "rows", None):
+            widget.refresh()
+
     # --- refresh -----------------------------------------------------------
     def on_shown(self) -> None:
         if self.state is None:
@@ -548,10 +560,13 @@ class PlatformPage(Page):
         active = state["active"]
         listing = state["objects"]
         count = len(listing.rows) if listing and not listing.error else 0
-        from .overview import _count
-        self.count_label.setText(_count(count, provider.object_noun_plural))
+        self.count_label.setText(
+            base_count(count, provider.object_noun_plural))
 
         info = []
+        host = provider.host()
+        if host is not None and host.is_wsl:
+            info.append(f"\U0001fa9f <b>{host.label}</b>")
         if active:
             info.append(f"\U0001f4cd {active.address or active.name}")
             kind = socket_kind(active.address)
@@ -919,6 +934,7 @@ class PlatformPage(Page):
 
     def _run(self, action) -> None:
         from ..dialogs.run_command import RunCommandDialog
+        action = self.PROVIDER.prepare(action)
         self.show_command(action.display(), note=action.id, record=False)
         dialog = RunCommandDialog(action, self)
         dialog.exec()

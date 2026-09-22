@@ -199,3 +199,21 @@ def test_a_running_job_survives_shutdown(app):
             break
     assert done == ["ok"]
     assert workers.stop_all_jobs() == 0
+
+
+def test_the_install_tab_of_a_technology_fills(window, app):
+    """It stayed empty on every platform: an embedded tools panel never gets
+    on_shown, which is what makes a page read its data. Found by looking at
+    a screenshot, not by a test."""
+    page = window.pages["platform-docker"]
+    window.go("platform-docker")
+    _settle(app)
+    index = [i for i in range(page.tabs.count())
+             if "Install" in page.tabs.tabText(i)][0]
+    page.tabs.setCurrentIndex(index)
+    for _ in range(100):
+        app.processEvents()
+        time.sleep(0.03)
+        if getattr(page.tools_panel, "rows", None):
+            break
+    assert page.tools_panel.rows, "the Install tab shows no tools"

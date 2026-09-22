@@ -48,19 +48,31 @@ def detect_os() -> tuple:
     if "bsd" in system:
         return "bsd", "", platform.system()
 
-    release = fs.read_text("/etc/os-release").lower()
+    family = family_from_os_release(fs.read_text("/etc/os-release"))
+    if family:
+        return "linux", family, LINUX_FAMILIES[family][0]
+    return "linux", "", "Linux"
+
+
+def family_from_os_release(text: str) -> str:
+    """The package family of a Linux system, from its /etc/os-release.
+
+    Used for this machine and for a WSL distribution on Windows, where the
+    install command must be the one for the Linux inside WSL.
+    """
+    release = (text or "").lower()
     for family in ("arch", "debian", "fedora", "suse", "alpine", "gentoo",
                    "nixos", "void"):
         if family in release:
-            return "linux", family, LINUX_FAMILIES[family][0]
+            return family
     # ID_LIKE covers derivatives that do not name the parent in ID.
     for family, keys in (("arch", ("cachyos", "manjaro", "endeavouros")),
                          ("debian", ("ubuntu", "mint", "pop", "kali")),
                          ("fedora", ("rhel", "centos", "rocky", "alma")),
                          ("suse", ("opensuse", "sles"))):
         if any(key in release for key in keys):
-            return "linux", family, LINUX_FAMILIES[family][0]
-    return "linux", "", "Linux"
+            return family
+    return ""
 
 
 OS_KIND, OS_FAMILY, OS_LABEL = detect_os()
@@ -142,10 +154,18 @@ class Tool:
             out.append(("FreeBSD", self.bsd))
         return out
 
-    def remove_command(self) -> str:
-        if OS_KIND != "linux" or not OS_FAMILY:
+    def linux_install_command(self, family: str) -> str:
+        """The install line for a given Linux family — a WSL distro's, say."""
+        package = self.packages.get(family)
+        if not family or not package:
             return ""
-        package = self.packages.get(OS_FAMILY)
+        return f"sudo {LINUX_FAMILIES[family][1]} {package}"
+
+    def remove_command(self, family: str = "") -> str:
+        family = family or (OS_FAMILY if OS_KIND == "linux" else "")
+        if not family:
+            return ""
+        package = self.packages.get(family)
         if not package:
             return ""
         remover = {
@@ -153,7 +173,7 @@ class Tool:
             "fedora": "dnf remove -y", "suse": "zypper remove -y",
             "alpine": "apk del", "gentoo": "emerge --unmerge",
             "nixos": "nix-env -e", "void": "xbps-remove -R",
-        }[OS_FAMILY]
+        }[family]
         return f"sudo {remover} {package}"
 
 

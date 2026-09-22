@@ -8,8 +8,8 @@
 <h1 align="center">📦 kontainy</h1>
 
 <p align="center">
-  <strong>Every Docker and Podman setting, in one interface</strong><br>
-  <sub>Docker, Podman, Kubernetes, KVM, Hyper-V, Incus, LXD and WSL — every target selectable, every setting explained, every command shown before it runs</sub>
+  <strong>Containers and virtualisation — in one window, or one command</strong><br>
+  <sub>Docker, Podman, Kubernetes, KVM/libvirt, Hyper-V, Incus and LXD. Every target selectable, every setting explained, every command shown before it runs.</sub>
 </p>
 
 <p align="center">
@@ -26,6 +26,7 @@
   <a href="#-why-kontainy-exists">Why</a> •
   <a href="#-educational-by-design">Educational</a> •
   <a href="#-install">Install</a> •
+  <a href="#-technologies">Technologies</a> •
   <a href="#-features">Features</a> •
   <a href="#-the-settings-catalogue">Config Catalog</a> •
   <a href="#-diagnostics">Diagnostics</a> •
@@ -33,6 +34,7 @@
   <a href="#-learn">Learn</a> •
   <a href="#-privilege-model">Privileges</a> •
   <a href="#-quick-start">Quick Start</a> •
+  <a href="#cli">CLI</a> •
   <a href="#-build-from-source">Build</a>
 </p>
 
@@ -73,34 +75,57 @@ this chain layer by layer and marks the winner.
 
 ---
 
-## 🧭 One page per technology
+## 🧭 Technologies
 
 Every container and virtualisation technology has the same shape under a
 different name: a set of **targets**, one of them **active**, each holding
 **objects**. kontainy gives each one the same page — a dropdown of targets
-at the top, the active one selected, and tabs underneath.
+at the top, the active one selected, and tabs underneath — and the same
+`ky` commands.
 
-| Technology | Target | Objects |
-|:---|:---|:---|
-| 🐳 **Docker** | contexts | containers |
-| 🦭 **Podman** | system connections | containers |
-| ☸ **Kubernetes** | kubeconfig contexts | pods |
-| 🖥 **KVM / libvirt** *(Linux, macOS)* | connection URIs | virtual machines, networks |
-| 🪟 **Hyper-V** *(Windows)* | hosts, local and remote | virtual machines, virtual switches |
-| 🧱 **Incus** · 📦 **LXD** | remotes | instances |
-| 🪟 **WSL** *(Windows)* | distributions — including Docker Desktop's own Linux | distributions |
+| Technology | Target | Objects | 🐧 Linux | 🪟 Windows | 🍎 macOS |
+|:---|:---|:---|:---:|:---:|:---:|
+| 🐳 **Docker** | contexts | containers | ✅ | ✅ | ✅ |
+| 🦭 **Podman** | system connections | containers | ✅ | ✅ | ✅ |
+| ☸ **Kubernetes** | kubeconfig contexts | pods | ✅ | ✅ | ✅ |
+| 🖥 **KVM / libvirt** | connection URIs | virtual machines, networks | ✅ | ✅ *via WSL 2* | ✅ |
+| 🪟 **Hyper-V** | hosts, local and remote | virtual machines, virtual switches | — | ✅ | — |
+| 🧱 **Incus** | remotes | instances | ✅ | ✅ *via WSL 2* | — |
+| 📦 **LXD** | remotes | instances | ✅ | ✅ *via WSL 2* | — |
 
-On every page you can **switch the active target** from the dropdown,
-**add** one, **remove** one and **test** one; **start, stop, restart and
-remove** objects one at a time or **all at once**; manage the **system
-services** the technology depends on; install it with **the command for your
-own distribution**; and pin new terminals to a target through your **shell
-profile**. The line under the dropdown says what the active target really is
-— *rootful · system socket (root)*, *rootless · your user socket*, *Docker
-Desktop VM*, *remote over SSH*.
+A technology that cannot exist on your system is not shown at all.
 
-Technologies that cannot exist on your operating system are not shown:
-there is no KVM page on Windows, and no Hyper-V or WSL page on Linux.
+On every page you can **switch the active target**, **add**, **remove** and
+**test** one; **start, stop, restart and remove** objects one at a time or
+**all at once**; manage the **system services** a technology depends on;
+**install** it with the command for your own distribution; and pin new
+terminals to a target through your **shell profile**. The line under the
+dropdown says what the active target really is — *rootful · system socket
+(root)*, *rootless · your user socket*, *Docker Desktop · Linux engine in
+WSL 2*, *remote over SSH*.
+
+### 🪟 On Windows, WSL is the vehicle
+
+WSL is not something kontainy asks you to manage for its own sake. It is
+what Docker Desktop and podman machine run their Linux engines in — and what
+kontainy uses to bring the Linux tools to Windows:
+
+- **KVM/libvirt, Incus and LXD** run inside a WSL 2 distribution. Their
+  pages say *via WSL · Ubuntu-24.04* and show every command exactly as it
+  runs: `wsl -d Ubuntu-24.04 -- virsh list --all`. Installing them uses that
+  distribution's own package manager, as root inside WSL — no Windows
+  administrator rights needed.
+- **KVM inside WSL** needs Windows 11 with nested virtualization. Without it
+  there is no `/dev/kvm` and QEMU falls back to slow emulation; the KVM page
+  tells you, and how to turn it on (`nestedVirtualization=true` in
+  `.wslconfig`).
+- **Docker and Podman** pages carry a *Backend* tab showing the distribution
+  their engine lives in (`docker-desktop`, `podman-machine-default`), with
+  restart, `wsl --shutdown` and `.wslconfig` — the usual cures when Docker
+  Desktop stops answering.
+- Which distribution carries the Linux tools is kontainy's own setting
+  (`ky wsl use NAME`). Your default distribution is never changed, and
+  `docker-desktop` is never used for it.
 
 ## 🎓 Educational by Design
 
@@ -451,7 +476,7 @@ this model costs so little: **65 of the 152 settings are directly editable.**
 
 ```bash
 pip install kontainy
-kontainy
+ky
 ```
 
 ### From source
@@ -503,32 +528,70 @@ loginctl enable-linger $USER    # so containers survive logout
 
 ### CLI
 
-kontainy answers three questions without opening a window:
+kontainy is a GUI, and **everything the GUI does also works headless** — on a
+server with no display, over SSH, or in a script. The command line drives
+the same code as the window, never loads Qt, and prints the exact command
+it will run before running it.
 
-Installing gives you three names for the same thing: `kontainy`, the short
-`ky`, and `kty` kept from the first release.
+Installing gives you the same tool under three names: **`ky`** to type,
+**`kontainy`** to read, and `kty` kept from the first release. On Windows,
+`kontainy-gui` opens the window without a console.
 
-```bash
-ky                   # the GUI
-ky --scan            # the context chain, every engine, systemd unit states
-ky --doctor          # run every diagnostic rule and print the findings
-ky --stats           # catalogue, rule and Learn counts
-ky --version         # print the version and exit
-```
+| Short | Full | What it does |
+|:------|:-----|:-------------|
+| `ky` | `kontainy` | Open the window |
+| `ky overview` | `kontainy overview` | Every technology here: installed, version, active target, object count |
+| `ky tech` | `kontainy tech` | The technologies available on this system, and where they run |
+| `ky docker targets` | `kontainy docker targets` | List contexts, the active one marked, with *rootful* / *rootless* / *remote* |
+| `ky docker use NAME` | `kontainy docker use NAME` | Switch the active context (asks first) |
+| `ky docker add NAME host=ssh://u@h` | `kontainy docker add …` | Add a context — `ky docker add` alone lists the fields |
+| `ky docker rm-target NAME` | `kontainy docker rm-target NAME` | Remove a context |
+| `ky docker test [NAME]` | `kontainy docker test` | Check a context answers |
+| `ky docker ls` | `kontainy docker ls` | List containers on the active context |
+| `ky docker stop web db` | `kontainy docker stop web db` | Act on containers by name: `start`, `stop`, `restart`, `logs`, `rm` |
+| `ky docker start-all` | `kontainy docker start-all` | Start every stopped container (`stop-all` too) |
+| `ky docker ports web 8080:80` | `kontainy docker ports web 8080:80` | Change a container's ports safely (recreates, keeps the original) |
+| `ky podman services` | `kontainy podman services` | The systemd units it depends on |
+| `ky podman service enable podman.socket` | `kontainy podman service …` | Start, stop, enable, disable a unit |
+| `ky docker shell` | `kontainy docker shell` | `DOCKER_CONTEXT` / `DOCKER_HOST` in your shell profile |
+| `ky docker shell set DOCKER_CONTEXT build` | `kontainy docker shell set …` | Pin new terminals to a target |
+| `ky kvm ls` | `kontainy libvirt ls` | Virtual machines; `start`, `shutdown`, `reboot`, `force-off`, `autostart` |
+| `ky kvm networks` | `kontainy libvirt networks` | Virtual networks; `start`, `stop`, `autostart`, `leases NAME` |
+| `ky kvm networks create name=lab bridge=virbr10 address=192.168.110.1 prefix=24` | … | Create a NAT network |
+| `ky hyperv ls` | `kontainy hyperv ls` | Hyper-V machines; `start`, `shutdown`, `save-state`, `turn-off`, `checkpoint` |
+| `ky hyperv switches` | `kontainy hyperv switches` | Hyper-V virtual switches |
+| `ky k8s targets` · `ky k8s ls` | `kontainy kubernetes …` | Kubeconfig contexts; pods with `logs`, `describe`, `delete` |
+| `ky incus ls` · `ky lxd ls` | `kontainy incus ls` | Instances; `start`, `stop`, `restart`, `delete` |
+| `ky TECH verbs` | `kontainy TECH verbs` | Everything one technology accepts |
+| `ky tools` | `kontainy tools` | Every installable tool, installed or not |
+| `ky install qemu` | `kontainy install qemu` | Install a tool with this system's package manager |
+| `ky uninstall qemu` | `kontainy uninstall qemu` | Remove it |
+| `ky catalog log-driver` | `kontainy catalog log-driver` | One configuration key, explained |
+| `ky catalog --search dns` | `kontainy catalog --search dns` | Search the 152 keys |
+| `ky doctor` | `kontainy doctor` | Run every diagnostic rule |
+| `ky scan` | `kontainy scan` | The context chain and every engine found |
+| `ky wsl` · `ky wsl use NAME` | `kontainy wsl …` | *(Windows)* Which WSL distribution carries the Linux tools |
+| `ky -V` | `kontainy -V` | Show the version (also `version`) |
+| `ky -h` | `kontainy -h` | Show help |
+
+Flags that work with every action, anywhere on the line:
+
+| Flag | Meaning |
+|:-----|:--------|
+| `-y`, `--yes` | Run without asking. Without a terminal, an action that would ask **refuses** unless `-y` is given — a script never runs something by accident |
+| `--dry-run` | Show the command, run nothing |
+| `--json` | Print lists as JSON |
+| `--target NAME` | Act on this target instead of the active one |
+| `-q`, `--quiet` | Don't print explanations |
 
 ```console
-$ ky --scan
-=== Terminal target ===
-  >> DOCKER_HOST (environment)          unix:///home/you/.docker/desktop/docker.sock
-     DOCKER_CONTEXT (environment)       —
-     config.json → currentContext       desktop-linux
-     built-in default                   unix:///var/run/docker.sock
-  EFFECTIVE: unix:///home/you/.docker/desktop/docker.sock
+$ ky docker stop web
+■  Stop
+  $ docker --context default stop web
+  Sends SIGTERM to web, then SIGKILL after the stop timeout if it has not exited.
 
-=== Engines ===
- * unix:///home/you/.docker/desktop/docker.sock   docker 29.8.0 (rootful)
-   unix:///run/user/1000/podman/podman.sock       podman 6.1.2 (rootless)
-   unix:///run/docker.sock                        docker 29.8.1 (rootful)
+Run this? [y/N] y
+web
 ```
 
 ---

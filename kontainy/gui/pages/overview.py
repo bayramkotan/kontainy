@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from ...core import actions as act
 from ...core.providers import PROVIDERS
+from ...core.providers.base import count_label as _count
 from ...core.registry import OS_KIND, OS_LABEL
 from ...utils.workers import CallableJob, run_job
 from .base import Page
@@ -54,14 +55,6 @@ def _summarise(provider) -> dict:
     return out
 
 
-def _count(n: int, plural: str) -> str:
-    """'1 container', '3 containers' — the noun is stored in the plural."""
-    word = plural.lower()
-    if n == 1 and word.endswith("s"):
-        word = word[:-1]
-    return f"{n} {word}"
-
-
 def _probe_all(providers: list) -> list:
     return [_summarise(p) for p in providers]
 
@@ -76,7 +69,7 @@ class OverviewPage(Page):
     open_page = Signal(str)
 
     def build(self) -> None:
-        self.providers = [p for p in PROVIDERS if OS_KIND in p.platforms]
+        self.providers = [p for p in PROVIDERS if p.shown_here()]
         self.cards = {}
         self.loaded = False
 

@@ -73,6 +73,18 @@ class Field:
     required: bool = True
 
 
+def count_label(n: int, plural: str) -> str:
+    """'1 container', '3 containers' — nouns are stored in the plural.
+
+    Lives here, not in the GUI, because the CLI prints the same counts and
+    must not import Qt to do it: `ky overview` said "1 containers".
+    """
+    word = plural.lower()
+    if n == 1 and word.endswith("s"):
+        word = word[:-1]
+    return f"{n} {word}"
+
+
 def socket_kind(address: str) -> str:
     """Say plainly what kind of endpoint an address is.
 
@@ -93,6 +105,8 @@ def socket_kind(address: str) -> str:
     if a.startswith(("tcp://", "http://", "https://")):
         return "remote over TCP"
     if a.startswith("npipe://"):
+        if "dockerdesktoplinuxengine" in a or "docker_engine" in a:
+            return "Docker Desktop \u00b7 Linux engine in WSL 2"
         return "Windows named pipe"
     if "/.docker/desktop/" in a or "docker-desktop" in a:
         return "Docker Desktop VM"
@@ -195,17 +209,87 @@ class Provider:
     # Whether rootless use depends on linger (Podman, for one).
     needs_linger = False
 
+    # --- where it runs -----------------------------------------------------
+    def host(self):
+        """Where this technology's commands run, or None if nowhere.
+
+        Native here → this machine. A Linux tool on Windows → the WSL
+        distribution kontainy uses for Linux tools. Otherwise → None, and
+        the technology is not shown on this operating system.
+        """
+        from .. import hosts
+        from ..registry import OS_KIND
+        if OS_KIND in self.platforms:
+            return hosts.LOCAL
+        if OS_KIND == "windows" and "linux" in self.platforms \
+                and self.runs_in_wsl:
+            return hosts.linux_host()
+        return None
+
+    # Linux tools that also work inside a WSL 2 distribution on Windows.
+    runs_in_wsl = True
+
+    def shown_here(self) -> bool:
+        """Whether this technology has a place on this operating system."""
+        from .. import hosts
+        from ..registry import OS_KIND
+        if OS_KIND in self.platforms:
+            return True
+        return (OS_KIND == "windows" and "linux" in self.platforms
+                and self.runs_in_wsl and hosts.wsl_available())
+
+    def _cli(self, argv: list, timeout: float = 15.0) -> tuple:
+        """Run a read-only query on this technology's host.
+
+        Uses the cli_text of the module the provider lives in, so the tests
+        that fake a module's CLI keep working unchanged.
+        """
+        import sys
+        run = getattr(sys.modules[type(self).__module__], "cli_text", cli_text)
+        host = self.host()
+        return run(host.wrap(argv) if host else argv, timeout=timeout)
+
+    def shown(self, argv: list) -> str:
+        """The command as it really runs — with the wsl prefix when there is
+        one. What a listing displays must be what was executed."""
+        host = self.host()
+        return " ".join(host.wrap(argv) if host else argv)
+
+    def prepare(self, action):
+        """Wrap an action's command for this host, just before it is shown.
+
+        Every action a page or the CLI runs passes through here, so a Linux
+        tool on Windows shows — and runs — `wsl -d Ubuntu -- virsh ...`.
+        """
+        host = self.host()
+        if host is not None and host.is_wsl and action.command:
+            action.command = host.wrap(action.command,
+                                       root=action.scope == ROOT)
+            if action.scope == ROOT:
+                action.scope = USER       # wsl -u root needs no elevation
+        return action
+
     # --- availability -----------------------------------------------------
     def available(self) -> bool:
-        return bool(shutil.which(self.binary))
+        host = self.host()
+        if host is None:
+            return False
+        return host.which(self.binary)
 
     def version(self) -> str:
         if not self.available():
             return ""
-        ok, text = cli_text([self.binary, "--version"], timeout=8.0)
+        ok, text = self._cli([self.binary, "--version"], timeout=8.0)
         return text.splitlines()[0] if ok and text else ""
 
     def unavailable_reason(self) -> str:
+        host = self.host()
+        if host is not None and host.is_wsl:
+            return (f"`{self.binary}` was not found in the WSL distribution "
+                    f"{host.distro}. Install it from the Install tab.")
+        if host is None and self.shown_here():
+            return ("No WSL distribution is available to run this Linux "
+                    "tool. Install one with:  wsl --install -d Ubuntu")
         return (f"`{self.binary}` was not found on PATH. Install it from the "
                 f"Install tab.")
 
@@ -280,6 +364,6 @@ def action(id: str, label: str, argv: list, explanation: str, *,
 
 
 __all__ = ["Provider", "Target", "Listing", "Column", "Field", "cli_text",
-           "socket_kind", "Section",
+           "socket_kind", "count_label", "Section",
            "json_lines", "json_value", "action", "Action", "USER", "ROOT",
            "SHELL", "NONE"]

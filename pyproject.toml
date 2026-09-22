@@ -46,6 +46,11 @@ kontainy = "kontainy.__main__:main"
 ky = "kontainy.__main__:main"
 kty = "kontainy.__main__:main"
 
+[project.gui-scripts]
+# On Windows this starts the window without a console, as VenvStudio's
+# venvstudio-gui does. Elsewhere it is the same as running `ky`.
+kontainy-gui = "kontainy.__main__:gui_main"
+
 [tool.setuptools.packages.find]
 # Discovered, never listed by hand. 0.0.4 shipped to PyPI without
 # kontainy/core/providers because the package list was written out manually

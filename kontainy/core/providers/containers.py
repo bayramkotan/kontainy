@@ -35,7 +35,7 @@ class DockerProvider(Provider):
         return resolve_cli_target().as_rows()
 
     def targets(self) -> list:
-        ok, text = cli_text(["docker", "context", "ls", "--format", "{{json .}}"])
+        ok, text = self._cli(["docker", "context", "ls", "--format", "{{json .}}"])
         if not ok:
             return []
         out = []
@@ -106,12 +106,12 @@ class DockerProvider(Provider):
         if target:
             argv += ["--context", target.name]
         argv += ["ps", "-a", "--format", "{{json .}}"]
-        ok, text = cli_text(argv)
+        ok, text = self._cli(argv)
         listing = Listing(
             columns=[Column("Names", "Name"), Column("Image", "Image"),
                      Column("State", "State"), Column("Status", "Status"),
                      Column("Ports", "Ports")],
-            command=" ".join(argv))
+            command=self.shown(argv))
         if not ok:
             listing.error = text
             return listing
@@ -149,7 +149,7 @@ class PodmanProvider(Provider):
     ]
 
     def targets(self) -> list:
-        ok, text = cli_text(["podman", "system", "connection", "list",
+        ok, text = self._cli(["podman", "system", "connection", "list",
                              "--format", "json"])
         rows = json_value(text, []) if ok else []
         out = []
@@ -220,12 +220,12 @@ class PodmanProvider(Provider):
         if target and target.name != "(local)":
             argv += ["--connection", target.name]
         argv += ["ps", "-a", "--format", "json"]
-        ok, text = cli_text(argv)
+        ok, text = self._cli(argv)
         listing = Listing(
             columns=[Column("Names", "Name"), Column("Image", "Image"),
                      Column("State", "State"), Column("Status", "Status"),
                      Column("Pod", "Pod")],
-            command=" ".join(argv))
+            command=self.shown(argv))
         if not ok:
             listing.error = text
             return listing
@@ -436,7 +436,7 @@ def _attach(cls):
     cls.can_edit_ports = lambda self: True
 
     def inspect_ports(self, target, name):
-        ok, text = cli_text([self.binary] + _conn_args(self, target) + ["inspect", name])
+        ok, text = self._cli([self.binary] + _conn_args(self, target) + ["inspect", name])
         info = (json_value(text, []) or [{}])[0] if ok else {}
         return port_bindings(info), info
 

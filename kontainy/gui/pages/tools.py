@@ -37,8 +37,38 @@ from ..styles import cmd_html
 from .base import Page
 
 
-def _probe(group: str, ids=None) -> list:
-    """Status for a group of tools, or for an explicit list of tool ids."""
+def _probe(group: str, ids=None, host=None) -> list:
+    """Status for a group of tools, or for an explicit list of tool ids.
+
+    With a WSL host the tools are Linux packages inside that distribution:
+    what counts is whether the binary exists THERE, and the install command
+    is the one for the distribution's own package manager.
+    """
+    if host is not None and host.is_wsl:
+        from ...core import hosts
+        family = hosts.distro_family(host)
+        rows = []
+        for tool_id in ids or []:
+            tool = reg.by_id(tool_id)
+            if tool is None:
+                continue
+            if reg.OS_KIND in tool.platforms:
+                # VirtualBox, Multipass and Vagrant run on Windows itself;
+                # they are not installed inside a WSL distribution.
+                rows.append({"tool": tool, "installed": tool.installed(),
+                             "path": tool.binary_path(),
+                             "version": tool.version() if tool.installed() else "",
+                             "services": [], "where": reg.OS_LABEL})
+                continue
+            if "linux" not in tool.platforms:
+                continue
+            present = any(host.which(b) for b in tool.binaries)
+            rows.append({"tool": tool, "installed": present,
+                         "path": f"in {host.distro}" if present else "",
+                         "version": "", "services": [],
+                         "host": host, "family": family,
+                         "where": f"WSL \u00b7 {host.distro}"})
+        return rows
     rows = []
     tools = ([reg.by_id(i) for i in ids
               if reg.by_id(i) and reg.available_here(reg.by_id(i))] if ids
@@ -65,6 +95,7 @@ class ToolsPage(Page):
 
     GROUP = "Containers"
     TOOL_IDS = None           # set to restrict the page to these tools
+    HOST = None               # a WSL host: tools live in that distribution
     open_setting = Signal(str)
 
     def build(self) -> None:
@@ -108,7 +139,7 @@ class ToolsPage(Page):
         self.refresh_btn.setEnabled(False)
         self.busy.emit(True)
         self.status.emit(f"Checking {self.GROUP.lower()}\u2026")
-        run_job(CallableJob(_probe, self.GROUP, self.TOOL_IDS),
+        run_job(CallableJob(_probe, self.GROUP, self.TOOL_IDS, self.HOST),
                 self._fill, self._failed)
 
     def _failed(self, message: str) -> None:
@@ -184,8 +215,10 @@ class ToolsPage(Page):
         else:
             p.append(f"<tr><td><b>Status</b></td><td style='color:"
                      f"{c['fg_muted']}'>not installed</td></tr>")
-        p.append(f"<tr><td><b>This system</b></td>"
-                 f"<td>{reg.OS_LABEL}</td></tr>")
+        # For a tool that lives inside WSL, say which Linux it is installed
+        # into — "Windows" would be the wrong answer.
+        p.append(f"<tr><td><b>Installs into</b></td>"
+                 f"<td>{entry.get('where') or reg.OS_LABEL}</td></tr>")
         p.append("</table>")
 
         # --- services ---
@@ -282,6 +315,9 @@ class ToolsPage(Page):
     def _actions_for(self, entry) -> list:
         tool = entry["tool"]
         actions = []
+        host = entry.get("host")
+        if host is not None and host.is_wsl:
+            return self._wsl_actions_for(entry, tool, host)
 
         if not entry["installed"]:
             command = tool.install_command()
@@ -412,7 +448,37 @@ class DesktopToolsPage(ToolsPage):
                 "Install them, and see whether their services are running.")
 
 
-def embedded_tools(tool_ids: list, label: str) -> ToolsPage:
+def _wsl_tool_actions(entry, tool, host) -> list:
+    family = entry.get("family", "")
+    if not entry["installed"]:
+        line = tool.linux_install_command(family)
+        if not line:
+            return [act.Action(
+                id=f"noinstall-{tool.id}", label="No package for this distribution",
+                command=[], scope=act.NONE,
+                explanation=(f"kontainy has no package name for {tool.name} "
+                             f"on the Linux in {host.distro}."))]
+        argv = host.wrap(line.split(), root=True)
+        return [act.Action(
+            id=f"install-{tool.id}", label=f"\U0001f4e5  Install {tool.name}",
+            command=argv, scope=act.USER,
+            explanation=(f"Installs {tool.name} inside the WSL distribution "
+                         f"{host.distro}, with that distribution's own "
+                         f"package manager, as root inside WSL (wsl -u root "
+                         f"needs no Windows administrator rights).\n\n"
+                         f"{tool.summary}"))]
+    line = tool.remove_command(family)
+    if not line:
+        return []
+    return [act.Action(
+        id=f"remove-{tool.id}", label=f"\U0001f5d1  Remove {tool.name}",
+        command=host.wrap(line.split(), root=True), scope=act.USER,
+        destructive=True,
+        explanation=(f"Removes the {tool.name} package from {host.distro}. "
+                     f"Virtual machines, images and data are not deleted."))]
+
+
+def embedded_tools(tool_ids: list, label: str, host=None) -> ToolsPage:
     """A tools list for a platform page's Install tab.
 
     Same install, remove and service logic as the standalone pages, without
@@ -420,12 +486,16 @@ def embedded_tools(tool_ids: list, label: str) -> ToolsPage:
     """
     cls = type(f"EmbeddedTools_{label}", (ToolsPage,), {
         "NAME": f"embedded-{label}", "TITLE": "", "SUBTITLE": "",
-        "GROUP": label, "TOOL_IDS": list(tool_ids)})
+        "GROUP": label, "TOOL_IDS": list(tool_ids), "HOST": host})
     page = cls()
     page.header.hide()
     page.command_strip.hide()
     page.layout().setContentsMargins(0, 6, 0, 0)
     return page
+
+
+ToolsPage._wsl_actions_for = lambda self, entry, tool, host: \
+    _wsl_tool_actions(entry, tool, host)
 
 
 class InstallPage(Page):

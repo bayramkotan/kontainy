@@ -55,7 +55,8 @@ def _platform(provider_id: str):
     """
     for provider in PROVIDERS:
         if provider.id == provider_id:
-            if OS_KIND not in provider.platforms:
+            # Native here, or a Linux tool that runs through WSL on Windows.
+            if not provider.shown_here():
                 return None
             return make_platform_page(provider)
     return None
@@ -82,7 +83,6 @@ SIDEBAR = [
     ("VIRTUALISATION", None),
     (None, _platform("libvirt")),
     (None, _platform("hyperv")),
-    (None, _platform("wsl")),
 
     ("SYSTEM CONTAINERS", None),
     (None, _platform("incus")),

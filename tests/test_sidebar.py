@@ -9,9 +9,10 @@ import importlib
 import pytest
 
 
-def _sidebar_on(monkeypatch, os_kind: str) -> list:
-    from kontainy.core import registry
+def _sidebar_on(monkeypatch, os_kind: str, wsl: bool = False) -> list:
+    from kontainy.core import hosts, registry
     monkeypatch.setattr(registry, "OS_KIND", os_kind)
+    monkeypatch.setattr(hosts, "wsl_available", lambda: wsl)
     import kontainy.gui.main_window as mw
     mw = importlib.reload(mw)
     return [cls.NAME for header, cls in mw.SIDEBAR if cls is not None]
@@ -24,12 +25,17 @@ def restore(monkeypatch):
     importlib.reload(mw)
 
 
-def test_windows_shows_wsl_and_hides_libvirt(monkeypatch):
+def test_windows_without_wsl_shows_hyperv_and_no_linux_tools(monkeypatch):
     names = _sidebar_on(monkeypatch, "windows")
-    assert "platform-wsl" in names
     assert "platform-hyperv" in names
     assert "platform-libvirt" not in names
     assert "platform-docker" in names and "platform-kubernetes" in names
+
+
+def test_windows_with_wsl_shows_linux_tools_but_never_a_wsl_page(monkeypatch):
+    names = _sidebar_on(monkeypatch, "windows", wsl=True)
+    assert "platform-libvirt" in names and "platform-incus" in names
+    assert "platform-wsl" not in names
 
 
 def test_linux_shows_libvirt_and_hides_wsl(monkeypatch):

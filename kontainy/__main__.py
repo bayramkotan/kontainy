@@ -162,18 +162,23 @@ def _cli(command) -> int:
 
 
 def main() -> int:
-    if "--version" in sys.argv or "-V" in sys.argv:
-        from kontainy.core.constants import APP_NAME, APP_VERSION
-        print(f"{APP_NAME} {APP_VERSION}")
-        return 0
-    if "--help" in sys.argv or "-h" in sys.argv:
-        print(__doc__)
-        return 0
+    args = sys.argv[1:]
+    # The original flags keep working for scripts written against 0.0.x.
     for flag, command in (("--scan", cli_scan), ("--doctor", cli_doctor),
                           ("--stats", cli_stats)):
-        if flag in sys.argv:
+        if flag in args:
             return _cli(command)
+    if args:
+        from kontainy import cli
+        code = _cli(lambda: cli.main(args))
+        if code != -1:                  # -1: "ky gui" asked for the window
+            return code
+    return gui_main()
 
+
+def gui_main() -> int:
+    """Open the window. Also the entry point of kontainy-gui, which Windows
+    starts without a console window."""
     try:
         from PySide6.QtWidgets import QApplication
     except ImportError as exc:
@@ -183,7 +188,7 @@ def main() -> int:
     from kontainy.core.constants import APP_NAME, APP_VERSION
     from kontainy.gui.main_window import MainWindow
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     window = MainWindow(version=APP_VERSION)

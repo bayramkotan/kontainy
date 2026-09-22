@@ -39,12 +39,12 @@ class KubernetesProvider(Provider):
     def version(self):
         if not self.available():
             return ""
-        ok, text = cli_text(["kubectl", "version", "--client", "-o", "json"])
+        ok, text = self._cli(["kubectl", "version", "--client", "-o", "json"])
         data = json_value(text, {}) if ok else {}
         return ((data or {}).get("clientVersion") or {}).get("gitVersion", "")
 
     def _config(self) -> dict:
-        ok, text = cli_text(["kubectl", "config", "view", "-o", "json"])
+        ok, text = self._cli(["kubectl", "config", "view", "-o", "json"])
         return (json_value(text, {}) or {}) if ok else {}
 
     def targets(self):
@@ -104,12 +104,12 @@ class KubernetesProvider(Provider):
         if target:
             argv += ["--context", target.name]
         argv += ["get", "pods", "-A", "-o", "json", "--request-timeout=8s"]
-        ok, text = cli_text(argv, timeout=12.0)
+        ok, text = self._cli(argv, timeout=12.0)
         listing = Listing(
             columns=[Column("namespace", "Namespace"), Column("name", "Pod"),
                      Column("phase", "Phase"), Column("node", "Node"),
                      Column("restarts", "Restarts")],
-            command=" ".join(argv))
+            command=self.shown(argv))
         if not ok:
             listing.error = text
             return listing
@@ -195,12 +195,29 @@ class LibvirtProvider(Provider):
     def _custom(self) -> list:
         return list(config().get("libvirt_uris") or [])
 
+    def _in_wsl(self) -> bool:
+        host = self.host()
+        return bool(host and host.is_wsl)
+
     def _active_uri(self) -> str:
+        if self._in_wsl():
+            # Inside WSL the user's libvirt.conf lives in the distribution,
+            # not on this Windows machine; kontainy keeps its own choice.
+            return config().get("libvirt_wsl_uri") or "qemu:///system"
         return (os.environ.get("LIBVIRT_DEFAULT_URI")
                 or _read_uri_default() or "qemu:///system")
 
     def warning(self):
-        if os.environ.get("LIBVIRT_DEFAULT_URI"):
+        host = self.host()
+        if host and host.is_wsl and self.available() \
+                and not host.exists("/dev/kvm"):
+            return ("There is no /dev/kvm in the WSL distribution "
+                    f"{host.distro}, so virtual machines would run in slow "
+                    "software emulation. KVM inside WSL needs Windows 11 and "
+                    "nested virtualization: add  nestedVirtualization=true  "
+                    "under [wsl2] in %UserProfile%\\.wslconfig, then run  "
+                    "wsl --shutdown.")
+        if not self._in_wsl() and os.environ.get("LIBVIRT_DEFAULT_URI"):
             return ("LIBVIRT_DEFAULT_URI is set in this environment and "
                     "overrides libvirt.conf, the same way DOCKER_HOST "
                     "overrides a docker context.")
@@ -223,6 +240,25 @@ class LibvirtProvider(Provider):
         return out
 
     def activate(self, target):
+        if self._in_wsl():
+            host = self.host()
+
+            def store():
+                config().set("libvirt_wsl_uri", target.address)
+                return f"kontainy now uses {target.address} in {host.distro}"
+            return Action(
+                id=f"libvirt-default-{target.name}",
+                label=f"Use {target.address} in {host.distro}",
+                command=[], scope=USER,
+                shell_text=(f"wsl -d {host.distro} -- virsh -c "
+                            f"{target.address} list --all"),
+                explanation=(
+                    f"kontainy will use {target.address} for the machines in "
+                    f"the WSL distribution {host.distro}. Your libvirt.conf "
+                    f"inside the distribution is left alone; the command "
+                    f"shown is how you would reach the same machines by "
+                    f"hand."),
+                func=store)
         return Action(
             id=f"libvirt-default-{target.name}",
             label=f"Make {target.address} the default connection",
@@ -284,11 +320,11 @@ class LibvirtProvider(Provider):
     def objects(self, target):
         uri = target.address if target else self._active_uri()
         argv = ["virsh", "-c", uri, "list", "--all"]
-        ok, text = cli_text(argv)
+        ok, text = self._cli(argv)
         listing = Listing(
             columns=[Column("id", "Id"), Column("name", "Name"),
                      Column("state", "State")],
-            command=" ".join(argv))
+            command=self.shown(argv))
         if not ok:
             listing.error = text
             return listing
@@ -319,9 +355,9 @@ class _RemoteProvider(Provider):
     platforms = ("linux",)
 
     def targets(self):
-        ok, text = cli_text([self.binary, "remote", "list", "--format", "json"])
+        ok, text = self._cli([self.binary, "remote", "list", "--format", "json"])
         remotes = (json_value(text, {}) or {}) if ok else {}
-        ok, current = cli_text([self.binary, "remote", "get-default"])
+        ok, current = self._cli([self.binary, "remote", "get-default"])
         current = current.strip() if ok else "local"
         out = []
         for name, info in remotes.items():
@@ -369,11 +405,11 @@ class _RemoteProvider(Provider):
         remote = f"{target.name}:" if target else ""
         argv = [self.binary, "list"] + ([remote] if remote else []) + [
             "--format", "json"]
-        ok, text = cli_text(argv)
+        ok, text = self._cli(argv)
         listing = Listing(
             columns=[Column("name", "Name"), Column("type", "Type"),
                      Column("status", "Status"), Column("image", "Image")],
-            command=" ".join(argv))
+            command=self.shown(argv))
         if not ok:
             listing.error = text
             return listing
@@ -587,15 +623,19 @@ def _libvirt_bulk(self, target, rows):
     running = [r["name"] for r in rows if _libvirt_running(r)]
     out = []
     if stopped:
+        host = self.host()
+        wrap = host.wrap if host else (lambda argv: argv)
         out.append(_sequence("virsh-start-all", f"\u25b6  Start all ({len(stopped)})",
-                             [["virsh", "-c", uri, "start", n] for n in stopped],
+                             [wrap(["virsh", "-c", uri, "start", n]) for n in stopped],
                              "Boots every stopped machine on this connection. "
                              "virsh takes one machine per command, so they run "
                              "in turn."))
     if running:
+        host = self.host()
+        wrap = host.wrap if host else (lambda argv: argv)
         out.append(_sequence("virsh-shutdown-all",
                              f"\u23fb  Shut down all ({len(running)})",
-                             [["virsh", "-c", uri, "shutdown", n] for n in running],
+                             [wrap(["virsh", "-c", uri, "shutdown", n]) for n in running],
                              "Asks every running guest to shut down cleanly.",
                              destructive=True))
     return out
@@ -702,7 +742,6 @@ WslProvider.bulk_actions = _wsl_bulk
 #  KVM / libvirt virtual networks
 # ===========================================================================
 import ipaddress as _ip
-import tempfile as _tempfile
 
 from .base import Section
 
@@ -737,11 +776,11 @@ def network_xml(name: str, bridge: str, address: str, prefix: int,
 def _net_listing(self, target):
     uri = target.address if target else self._active_uri()
     argv = ["virsh", "-c", uri, "net-list", "--all"]
-    ok, text = cli_text(argv)
+    ok, text = self._cli(argv)
     listing = Listing(columns=[Column("name", "Network"), Column("state", "State"),
                                Column("autostart", "At boot"),
                                Column("persistent", "Persistent")],
-                      command=" ".join(argv))
+                      command=self.shown(argv))
     if not ok:
         listing.error = text
     else:
@@ -815,26 +854,34 @@ def _net_create(self, target, values):
                       int(values.get("prefix") or 24), values.get("dhcp_start", ""),
                       values.get("dhcp_end", ""), mode)
 
+    host = self.host()
+    wrap = host.wrap if host else (lambda argv: argv)
+
     def execute():
-        handle = _tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False,
-                                              encoding="utf-8")
-        handle.write(xml)
-        handle.close()
-        try:
-            for argv in (["virsh", "-c", uri, "net-define", handle.name],
-                         ["virsh", "-c", uri, "net-start", name],
-                         ["virsh", "-c", uri, "net-autostart", name]):
-                result = _run(argv, note=f"net-create-{name}")
-                if not result.ok:
-                    raise RuntimeError(f"{' '.join(argv)}: {result.output}")
-        finally:
-            os.unlink(handle.name)
+        # The XML goes to virsh on standard input rather than through a temp
+        # file: inside WSL a Windows path means nothing, and stdin works the
+        # same on Linux and through wsl.exe.
+        import subprocess
+        define = wrap(["virsh", "-c", uri, "net-define", "/dev/stdin"])
+        proc = subprocess.run(define, input=xml.encode("utf-8"),
+                              capture_output=True, timeout=60)
+        if proc.returncode != 0:
+            raise RuntimeError(f"{' '.join(define)}: "
+                               + (proc.stderr or proc.stdout).decode(
+                                   "utf-8", errors="replace"))
+        for argv in (["virsh", "-c", uri, "net-start", name],
+                     ["virsh", "-c", uri, "net-autostart", name]):
+            result = _run(wrap(argv), note=f"net-create-{name}")
+            if not result.ok:
+                raise RuntimeError(f"{' '.join(argv)}: {result.output}")
         return f"network {name} defined, started and set to start at boot"
 
     return Action(
         id=f"net-create-{name}", label=f"Create network '{name}'",
         command=[], scope=USER,
-        shell_text=(f"cat > {name}.xml <<'EOF'\n{xml}EOF\n"
+        shell_text=(("" if not (host and host.is_wsl) else
+                     f"# inside WSL \u00b7 {host.distro}\n")
+                    + f"cat > {name}.xml <<'EOF'\n{xml}EOF\n"
                     f"virsh -c {uri} net-define {name}.xml\n"
                     f"virsh -c {uri} net-start {name}\n"
                     f"virsh -c {uri} net-autostart {name}"),
