@@ -157,37 +157,47 @@ class WindowMenuMixin:
 
 
         # ── Help ──────────────────────────────────────────────────────────
+        # Same shape as VenvStudio's Help menu: About, Check for Updates,
+        # then the three links people go looking for. kontainy keeps its
+        # documentation links as well, in a submenu so the top level stays
+        # the same length.
         help_menu = menubar.addMenu("&Help")
 
-        about = QAction(f"\u2139 About {APP_NAME}", self)
+        about = QAction(f"\u2139\ufe0f About {APP_NAME}", self)   # U+FE0F: draw it as an emoji, as VenvStudio does
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
 
-        help_menu.addSeparator()
-
-        github = QAction("\U0001f419 GitHub Repository", self)
-        github.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(APP_REPO)))
-        help_menu.addAction(github)
-
-        issues = QAction("\U0001f41b Report an Issue", self)
-        issues.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl(f"{APP_REPO}/issues")))
-        help_menu.addAction(issues)
+        updates = QAction("\U0001f504 Check for Updates", self)
+        updates.triggered.connect(self._check_for_updates)
+        help_menu.addAction(updates)
 
         help_menu.addSeparator()
 
+        for label, url in (
+            ("\u2b50 GitHub Repository", APP_REPO),
+            ("\U0001f4e6 PyPI Page", "https://pypi.org/project/kontainy/"),
+            ("\U0001f41b Report a Bug", f"{APP_REPO}/issues"),
+        ):
+            action = QAction(label, self)
+            action.triggered.connect(
+                lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+            help_menu.addAction(action)
+
+        help_menu.addSeparator()
+
+        docs_menu = help_menu.addMenu("\U0001f4d6 Documentation")
         for label, url in (
             ("Docker Engine docs", "https://docs.docker.com/engine/"),
             ("Podman docs", "https://docs.podman.io/"),
             ("Quadlet reference",
              "https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html"),
             ("Kubernetes docs", "https://kubernetes.io/docs/home/"),
+            ("libvirt docs", "https://libvirt.org/docs.html"),
         ):
             action = QAction(f"\U0001f517 {label}", self)
             action.triggered.connect(
                 lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
-            help_menu.addAction(action)
+            docs_menu.addAction(action)
 
     # --- handlers ----------------------------------------------------------
     def _menu_new_container(self) -> None:
@@ -246,5 +256,48 @@ class WindowMenuMixin:
         self.pages["install"].show_group("Desktop applications")
 
     def _show_about(self) -> None:
-        from .dialogs.about import AboutDialog
-        AboutDialog(self).exec()
+        from .dialogs.about import show_about
+        show_about(self)
+
+    def _check_for_updates(self) -> None:
+        """Ask PyPI whether there is a newer release.
+
+        VenvStudio does this on the GUI thread behind a progress dialog,
+        which freezes the window for as long as the network takes. kontainy
+        runs every slow thing in a worker, so this one goes there too and
+        the window stays alive.
+        """
+        from ..core.updater import check_for_update
+        from ..utils.workers import CallableJob, run_job
+        self.statusBar().showMessage("Asking PyPI for the latest version\u2026")
+        run_job(CallableJob(check_for_update), self._updates_answer,
+                lambda message: self._updates_answer({"error": message}))
+
+    def _updates_answer(self, result: dict) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from ..core.constants import APP_VERSION
+        from ..core.updater import PROJECT_PAGE, upgrade_command
+        self.statusBar().clearMessage()
+        if result.get("error"):
+            QMessageBox.warning(
+                self, "Check for Updates",
+                f"<p>Could not reach PyPI.</p><p>{result['error']}</p>"
+                f"<p>You are running <b>v{APP_VERSION}</b>.</p>")
+            return
+        if not result.get("update_available"):
+            QMessageBox.information(
+                self, "Check for Updates",
+                f"<p>\u2705 You are running the latest version: "
+                f"<b>v{APP_VERSION}</b>.</p>")
+            return
+        answer = QMessageBox.question(
+            self, "Check for Updates",
+            f"<p><b>kontainy v{result['latest']}</b> is available. "
+            f"You have <b>v{APP_VERSION}</b>.</p>"
+            f"<p>Upgrade with:<br><code>{upgrade_command()}</code></p>"
+            f"<p>On Linux, a system-wide install also needs "
+            f"<code>--break-system-packages</code>.</p>"
+            f"<p>Open the project page?</p>",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl(result.get("url") or PROJECT_PAGE))

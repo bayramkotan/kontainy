@@ -11,7 +11,7 @@ yükseltilir — sormak da yok, beklenir.
 
 APP_NAME = "kontainy"
 APP_VERSION = "0.0.7"
-APP_TAGLINE = "Every Docker and Podman setting, in one interface"
+APP_TAGLINE = "Containers and virtualisation \u2014 in one window, or one command"
 APP_REPO = "https://github.com/bayramkotan/kontainy"
 
 # Must match [project.scripts] in pyproject.toml.
