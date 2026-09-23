@@ -64,7 +64,28 @@ class CallableJob(Job):
             self.failed.emit(str(exc))
 
 
-def run_job(job: Job, on_done, on_failed=None) -> QThread:
+class StreamJob(Job):
+    """A job that reports lines while it works.
+
+    The function is given an `emit` callable; whatever it passes arrives on
+    the `progress` signal, in the GUI thread, as it happens.
+    """
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self._fn(self.progress.emit, *self._args,
+                                    **self._kwargs))
+        except Exception as exc:                             # noqa: BLE001
+            self.failed.emit(str(exc))
+
+
+def run_job(job: Job, on_done, on_failed=None, on_progress=None) -> QThread:
     """Bir Job'u arka planda çalıştırır ve bitene kadar canlı tutar."""
     thread = QThread()
     job.moveToThread(thread)
@@ -72,6 +93,8 @@ def run_job(job: Job, on_done, on_failed=None) -> QThread:
     _LIVE_JOBS.append(entry)
 
     thread.started.connect(job.run)
+    if on_progress is not None:
+        job.progress.connect(on_progress)
     job.done.connect(on_done)
     job.done.connect(thread.quit)
     if on_failed is not None:

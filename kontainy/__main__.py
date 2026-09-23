@@ -162,6 +162,12 @@ def _cli(command) -> int:
 
 
 def main() -> int:
+    # Before anything else: an unhandled error must land in a crash report
+    # rather than vanish with the window or the thread that raised it.
+    from kontainy.utils import logs
+    logs.install_hooks()
+    logs.clean_old_crashes()
+
     args = sys.argv[1:]
     # The original flags keep working for scripts written against 0.0.x.
     for flag, command in (("--scan", cli_scan), ("--doctor", cli_doctor),
@@ -187,7 +193,9 @@ def gui_main() -> int:
 
     from kontainy.core.constants import APP_NAME, APP_VERSION
     from kontainy.gui.main_window import MainWindow
+    from kontainy.utils import logs
 
+    logs.install_qt_handler()          # Qt's warnings into kontainy's log
     app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)

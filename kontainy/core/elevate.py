@@ -85,6 +85,54 @@ def is_root() -> bool:
 # ---------------------------------------------------------------------------
 #  Running
 # ---------------------------------------------------------------------------
+def run_streaming(command: list, on_line, *, timeout: float = 900.0,
+                  note: str = "", record: bool = True) -> CommandResult:
+    """Run a command and hand each line over as it appears.
+
+    An install prints for minutes; capturing it all and showing it at the end
+    tells the user nothing while they wait, and looks like a freeze. Output
+    is merged — package managers write progress to stderr as often as to
+    stdout — and the timeout is generous, because downloading a base image
+    on a slow line is not a hang.
+    """
+    import time as _time
+    shown = " ".join(command)
+    lines = []
+    try:
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True,
+                                bufsize=1, errors="replace")
+    except FileNotFoundError:
+        result = CommandResult(shown, 127, "",
+                               f"{command[0]}: command not found")
+        if record:
+            history().add(shown, note=note, ok=False)
+        return result
+    except OSError as exc:
+        return CommandResult(shown, 1, "", str(exc))
+
+    deadline = _time.monotonic() + timeout
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            lines.append(line)
+            on_line(line)
+            if _time.monotonic() > deadline:
+                proc.kill()
+                on_line(f"\u2014 stopped after {timeout:.0f}s")
+                break
+        proc.wait(timeout=10)
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+
+    result = CommandResult(shown, proc.returncode or 0, "\n".join(lines), "")
+    if record:
+        history().add(shown, note=note, ok=result.ok)
+    log().info("ran (%s): %s", result.returncode, shown)
+    return result
+
+
 def run(command: list, *, timeout: float = 60.0, note: str = "",
         record: bool = True) -> CommandResult:
     """Run a command as the current user."""

@@ -79,7 +79,8 @@ def test_objects_as_json(fake_docker):
 def test_an_action_runs_exactly_the_command_it_shows(fake_docker):
     code, out, _ = ky("docker", "stop", "web", "-y")
     assert code == 0
-    assert "$ docker --context default stop web" in out
+    assert "docker --context default stop web" in out
+    assert "COMMAND" in out, "the command is shown in its own box"
     assert fake_docker() == ["--context default stop web"]
 
 

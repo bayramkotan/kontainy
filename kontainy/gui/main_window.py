@@ -83,6 +83,7 @@ SIDEBAR = [
     ("VIRTUALISATION", None),
     (None, _platform("libvirt")),
     (None, _platform("hyperv")),
+    (None, _platform("vmware")),
 
     ("SYSTEM CONTAINERS", None),
     (None, _platform("incus")),

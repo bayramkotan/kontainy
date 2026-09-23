@@ -9,6 +9,7 @@ from __future__ import annotations
 from .base import Field, Listing, Provider, Target
 from .containers import DockerProvider, PodmanProvider
 from .hyperv import HyperVProvider
+from .vmware import VMwareProvider
 from .platforms import (IncusProvider, KubernetesProvider, LibvirtProvider,
                         LxdProvider, WslProvider, parse_wsl_list)
 
@@ -45,6 +46,7 @@ PROVIDERS = [
     KubernetesProvider(),
     LibvirtProvider(),
     HyperVProvider(),
+    VMwareProvider(),
     IncusProvider(),
     LxdProvider(),
 ]
@@ -57,5 +59,5 @@ def by_id(provider_id: str):
     return None
 
 
-__all__ = ["PROVIDERS", "by_id", "Provider", "Target", "Listing", "Field",
+__all__ = ["PROVIDERS", "by_id", "VMwareProvider", "Provider", "Target", "Listing", "Field",
            "parse_wsl_list"]

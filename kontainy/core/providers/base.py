@@ -85,6 +85,34 @@ def count_label(n: int, plural: str) -> str:
     return f"{n} {word}"
 
 
+#: What a failed listing usually means, said the way a person would say it.
+#: The raw text still exists — it goes behind "Details" — but a card that
+#: shouts a Go stack trace at someone who may never install the thing is
+#: noise. (Bayram, 2026-09-23, on the Overview cards.)
+ERROR_MEANINGS = [
+    (("cannot connect to the docker daemon", "failed to connect to the docker",
+      "is the docker daemon running", "dockerdesktoplinuxengine",
+      "docker_engine", "no such file or directory"), "installed, not running"),
+    (("hyper-v administrators", "required permission", "access is denied",
+      "permission denied", "not authorized"), "installed, needs permission"),
+    (("couldn't get current server api group list", "connection refused",
+      "was refused", "no route to host", "i/o timeout", "timed out",
+      "unable to connect to the server"), "installed, nothing to connect to"),
+    (("no cluster is configured", "no kubeconfig", "no configuration has been provided"),
+     "installed, no cluster configured"),
+    (("not found", "command not found", "no such command"), "installed"),
+]
+
+
+def summarise_error(text: str) -> str:
+    """One short line for a card; the full text stays for the details pane."""
+    lowered = (text or "").lower()
+    for needles, meaning in ERROR_MEANINGS:
+        if any(needle in lowered for needle in needles):
+            return meaning
+    return "installed, not answering"
+
+
 def socket_kind(address: str) -> str:
     """Say plainly what kind of endpoint an address is.
 

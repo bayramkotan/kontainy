@@ -47,8 +47,28 @@ def as_list(data) -> list:
     return data if isinstance(data, list) else [data]
 
 
+#: PowerShell exits 0 even when a cmdlet fails, as long as the error is not
+#: terminating — so the exit code says nothing. Errors are caught inside the
+#: script and marked, which is the only reliable signal. Without this,
+#: "Get-VMHost : You do not have the required permission" counted as success
+#: and kontainy reported Hyper-V as installed on a machine without it.
+MARK = "KONTAINY-FAILED:"
+
+
 def ps(script: str, timeout: float = 20.0) -> tuple:
     return cli_text(POWERSHELL + [script], timeout=timeout)
+
+
+def ps_checked(script: str, timeout: float = 20.0) -> tuple:
+    """(ok, text) where ok really means the cmdlet worked."""
+    guarded = (f"try {{ {script} }} catch {{ "
+               f"Write-Output \"{MARK} $($_.Exception.Message)\" }}")
+    ok, text = ps(guarded, timeout=timeout)
+    if not ok:
+        return False, text
+    if MARK in text:
+        return False, text.split(MARK, 1)[1].strip()
+    return True, text.strip()
 
 
 def _host_arg(target) -> str:
@@ -81,22 +101,46 @@ class HyperVProvider(Provider):
 
     # --- availability -------------------------------------------------------
     def available(self) -> bool:
+        """Hyper-V answers, not merely: the cmdlets exist.
+
+        The Hyper-V PowerShell module is present on machines that never
+        enabled Hyper-V — WSL 2 and VMware both turn on the Windows
+        hypervisor platform and the module comes with it. Asking only
+        whether Get-VM exists reported Hyper-V as installed on a machine
+        that has none, which is what Bayram saw on 2026-09-23.
+        """
         if platform.system() != "Windows":
             return False
-        ok, text = ps("if (Get-Command Get-VM -ErrorAction SilentlyContinue)"
-                      " { 'yes' } else { 'no' }", timeout=10.0)
-        return ok and text.strip().endswith("yes")
+        ok, text = ps_checked("(Get-VMHost -ErrorAction Stop).Name",
+                              timeout=20.0)
+        self._refusal = "" if ok else text
+        return ok and bool(text.strip())
+
+    _refusal = ""
 
     def unavailable_reason(self) -> str:
         if platform.system() != "Windows":
             return "Hyper-V exists only on Windows."
-        return ("The Hyper-V PowerShell module was not found. Hyper-V needs "
-                "Windows Pro, Enterprise or Education; enable it from the "
-                "Install tab, then restart.")
+        refusal = (self._refusal or "").lower()
+        if "permission" in refusal or "denied" in refusal:
+            return ("Hyper-V is enabled, but you are not a member of the "
+                    "local 'Hyper-V Administrators' group. Add yourself with "
+                    "Add-LocalGroupMember -Group 'Hyper-V Administrators' "
+                    "-Member $env:USERNAME  as administrator, then sign out "
+                    "and in again.")
+        return ("Hyper-V is not enabled on this machine. Its PowerShell "
+                "module can be present without it \u2014 WSL 2 and VMware "
+                "turn on the Windows hypervisor platform and the module "
+                "comes along. Hyper-V itself needs Windows Pro, Enterprise "
+                "or Education; enable it from the Install tab, then restart.")
 
     def version(self) -> str:
-        ok, text = ps("(Get-Module -ListAvailable Hyper-V | Select-Object "
-                      "-First 1).Version.ToString()")
+        # Only once Hyper-V itself answers: the module's version on a machine
+        # with no Hyper-V is a version of nothing.
+        if not self.available():
+            return ""
+        ok, text = ps_checked("(Get-Module -ListAvailable Hyper-V | "
+                              "Select-Object -First 1).Version.ToString()")
         return f"Hyper-V module {text.strip()}" if ok and text.strip() else ""
 
     # --- hosts ----------------------------------------------------------------
@@ -182,7 +226,7 @@ class HyperVProvider(Provider):
                      Column("CPUUsage", "CPU %"), Column("MemoryMB", "Memory MB"),
                      Column("Uptime", "Uptime"), Column("Generation", "Gen")],
             command=script)
-        ok, text = ps(script)
+        ok, text = ps_checked(script)
         if not ok:
             listing.error = self._explain_error(text)
             return listing
@@ -289,7 +333,7 @@ class HyperVProvider(Provider):
                                    Column("NetAdapterInterfaceDescription",
                                           "Adapter")],
                           command=script)
-        ok, text = ps(script)
+        ok, text = ps_checked(script)
         if not ok:
             listing.error = self._explain_error(text)
         else:

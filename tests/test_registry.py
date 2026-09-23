@@ -83,3 +83,22 @@ def test_no_package_gives_no_command(monkeypatch):
     monkeypatch.setattr(reg, "OS_KIND", "linux")
     monkeypatch.setattr(reg, "OS_FAMILY", "gentoo")
     assert reg.by_id("k3s").install_command() == ""
+
+
+def test_a_windowed_binary_is_never_run_for_its_version(monkeypatch):
+    """vmconnect.exe answers --version by opening a usage dialog. kontainy
+    probed it while listing Hyper-V's tools and the dialog landed on the
+    user's screen. (Bayram, 2026-09-23.)"""
+    tool = reg.by_id("hyperv")
+    assert tool.gui_only, "Hyper-V's binary opens a window"
+    called = []
+    monkeypatch.setattr(reg, "run",
+                        lambda *a, **k: called.append(a) or None)
+    monkeypatch.setattr(type(tool), "binary_path", lambda self: "vmconnect.exe")
+    assert tool.version() == ""
+    assert not called, "nothing may be executed for a windowed binary"
+
+
+def test_ordinary_tools_still_report_a_version(monkeypatch):
+    tool = reg.by_id("docker")
+    assert not tool.gui_only

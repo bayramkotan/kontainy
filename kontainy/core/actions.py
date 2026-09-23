@@ -56,7 +56,11 @@ class Action:
     func: object = None
 
     def display(self) -> str:
-        if self.scope == SHELL or (self.func is not None and self.shell_text):
+        # With no command to run, whatever text the action carries IS what it
+        # has to show. Without this, an action that only explains something
+        # ("nothing to switch to") appeared as an empty line.
+        if self.scope == SHELL or not self.command or \
+                (self.func is not None and self.shell_text):
             return self.shell_text
         prefix = "sudo " if self.scope == ROOT else ""
         return prefix + " ".join(self.command)

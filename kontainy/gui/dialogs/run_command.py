@@ -15,13 +15,15 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout,
+    QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar, QPushButton,
+    QVBoxLayout,
 )
 
 from ...core.actions import NONE, ROOT, SHELL, USER, Action
-from ...core.elevate import can_elevate, elevation_note
+from ...core.elevate import can_elevate, elevation_note, run_streaming
+from ...core.install_steps import percent_of, stage_of, steps_for
 from ...utils.config import config
-from ...utils.workers import CallableJob, run_job
+from ...utils.workers import CallableJob, StreamJob, run_job
 from ..styles import cmd_html, get_colors
 
 
@@ -34,6 +36,7 @@ class RunCommandDialog(QDialog):
         super().__init__(parent)
         self.action = action
         self.result_obj = None
+        self._reached = 0
         self.setWindowTitle(action.label)
         self.resize(760, 560)
         self._build()
@@ -95,6 +98,27 @@ class RunCommandDialog(QDialog):
             f" border-radius: 8px; padding: 12px; line-height: 150%;")
         layout.addWidget(explanation, 1)
 
+        # --- what is happening, while it happens ---
+        self.steps = steps_for(self.action.display())
+        self.step_labels = {}
+        self.step_box = QLabel("")
+        self.step_box.setVisible(False)
+        self.step_box.setWordWrap(True)
+        self.step_box.setTextFormat(Qt.RichText)
+        self.step_box.setStyleSheet(
+            f"color: {c['fg']}; font-size: {c['fs_base'] + 1}px;"
+            f" background: {c['card']}; border: 1px solid {c['border']};"
+            f" border-radius: 8px; padding: 12px; line-height: 150%;")
+        layout.addWidget(self.step_box)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, len(self.steps))
+        self.progress.setValue(0)
+        self.progress.setTextVisible(True)
+        self.progress.setFormat("")
+        self.progress.setVisible(False)
+        layout.addWidget(self.progress)
+
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
         self.output.setVisible(False)
@@ -131,16 +155,77 @@ class RunCommandDialog(QDialog):
         QGuiApplication.clipboard().setText(self.action.display())
         self.copy_btn.setText("\u2713  Copied")
 
+    # --- the steps panel -------------------------------------------------
+    def _stage_index(self, key: str) -> int:
+        for index, (name, _label, _why) in enumerate(self.steps):
+            if name == key:
+                return index
+        return -1
+
+    def _render_steps(self):
+        c = self._c()
+        rows = []
+        for index, (_key, label, why) in enumerate(self.steps):
+            if index < self._reached:
+                mark, colour = "\u2705", c["success"]
+            elif index == self._reached:
+                mark, colour = "\u25b6", c["accent"]
+            else:
+                mark, colour = "\u25cb", c["fg_muted"]
+            rows.append(f"<div style='color:{colour}'>{mark} <b>{label}</b>"
+                        f"<br><span style='color:{c['fg_muted']}'>{why}"
+                        f"</span></div>")
+        self.step_box.setText("<br>".join(rows))
+
+    def _on_line(self, line: str):
+        self.output.appendPlainText(line)
+        key = stage_of(line)
+        if key:
+            index = self._stage_index(key)
+            # Never go backwards: a late "Reading package lists" from a
+            # sub-process should not undo the progress already shown.
+            if index > self._reached:
+                self._reached = index
+                self.progress.setValue(index)
+                self._render_steps()
+        percent = percent_of(line)
+        if percent >= 0:
+            self.progress.setFormat(f"{self.steps[self._reached][1]} "
+                                    f"\u2014 {percent}%")
+        else:
+            self.progress.setFormat(self.steps[self._reached][1])
+
     def _run(self):
         self.run_btn.setEnabled(False)
         self.run_btn.setText("Running\u2026")
+        self.close_btn.setEnabled(False)
         self.output.setVisible(True)
         self.output.setPlainText(f"$ {self.action.display()}\n")
-        run_job(CallableJob(self.action.execute), self._done, self._failed)
+        self._reached = 0
+        self.step_box.setVisible(True)
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+        self._render_steps()
+
+        # A command kontainy runs itself (writing a file, storing a setting)
+        # has no output to follow; only a real process can be streamed.
+        if self.action.func is not None or self.action.scope == ROOT:
+            run_job(CallableJob(self.action.execute), self._done, self._failed)
+            return
+        run_job(StreamJob(lambda emit: run_streaming(
+            list(self.action.command), emit, note=self.action.id)),
+            self._done, self._failed, on_progress=self._on_line)
 
     def _done(self, result):
         self.result_obj = result
-        self.output.appendPlainText(result.output)
+        # Streamed output is already on screen; a captured one is not.
+        if result.output and result.output not in self.output.toPlainText():
+            self.output.appendPlainText(result.output)
+        self._reached = len(self.steps)
+        self.progress.setValue(len(self.steps))
+        self.progress.setFormat("Done" if result.ok else "Failed")
+        self._render_steps()
+        self.close_btn.setEnabled(True)
         if result.skipped:
             self.output.appendPlainText(f"\n\u2014 not run: {result.skipped}")
         elif result.ok:
@@ -153,5 +238,7 @@ class RunCommandDialog(QDialog):
 
     def _failed(self, message: str):
         self.output.appendPlainText(f"\n\u274c {message}")
+        self.progress.setFormat("Failed")
+        self.close_btn.setEnabled(True)
         self.run_btn.setText("Failed")
         self.finished_ok.emit(False)

@@ -182,7 +182,15 @@ def test_every_provider_is_complete(provider):
 
 @pytest.mark.parametrize("provider", providers.PROVIDERS, ids=lambda p: p.id)
 def test_removal_is_marked_destructive(provider):
+    """Removing a target is destructive — unless there is nothing to remove.
+
+    VMware's host is not something kontainy added, so its removal does
+    nothing and says so; an action that runs no command cannot be
+    destructive."""
     act = provider.remove(base.Target("sample", "sample://address"))
+    if act.scope == "none" and not act.command:
+        assert act.explanation.strip(), f"{provider.id}: says nothing"
+        return
     assert act.destructive, f"{provider.id}: removal must ask twice"
 
 
@@ -201,3 +209,27 @@ def test_install_tab_tools_exist():
     for provider in providers.PROVIDERS:
         missing = [t for t in provider.tool_ids if t not in known]
         assert not missing, f"{provider.id} lists unknown tools {missing}"
+
+
+def test_kubectl_without_a_cluster_is_not_kubernetes(monkeypatch):
+    """Docker Desktop installs kubectl.exe and puts it on PATH, so a machine
+    that never touched Kubernetes showed it as installed, in green, with a
+    version. Without a configured cluster there is nothing to manage."""
+    monkeypatch.setattr(platforms, "cli_text", fake_cli(
+        {"kubectl config view": '{"contexts":[],"current-context":""}'}))
+    provider = platforms.KubernetesProvider()
+    monkeypatch.setattr(type(provider).__mro__[1], "available",
+                        lambda self: True)          # the binary exists
+    assert provider.available() is False
+    assert provider.version() == ""
+    reason = provider.unavailable_reason()
+    assert "no cluster is configured" in reason or "was not found" in reason
+
+
+def test_kubectl_with_a_cluster_is_kubernetes(monkeypatch):
+    monkeypatch.setattr(platforms, "cli_text", fake_cli(
+        {"kubectl config view": KUBE_CONFIG}))
+    provider = platforms.KubernetesProvider()
+    monkeypatch.setattr(type(provider).__mro__[1], "available",
+                        lambda self: True)
+    assert provider.available() is True

@@ -36,6 +36,27 @@ class KubernetesProvider(Provider):
                "namespace. The current context is where every kubectl "
                "command goes.")
 
+    def available(self) -> bool:
+        """kubectl AND a cluster to point it at.
+
+        The binary alone means nothing here: Docker Desktop installs
+        kubectl.exe and puts it on PATH, so a Windows machine that never
+        touched Kubernetes reported it as installed, with a version, in
+        green. (Bayram, 2026-09-23: "kubernetes yüklü değil!!!")
+        """
+        return super().available() and bool(self.targets())
+
+    def unavailable_reason(self) -> str:
+        import shutil as _shutil
+        where = _shutil.which("kubectl")
+        if not where:
+            return ("`kubectl` was not found. Install it from the Install "
+                    "tab, or get a cluster with k3s, kind or minikube.")
+        return (f"`kubectl` is present ({where}) but no cluster is "
+                f"configured, so there is nothing to manage. On Windows it "
+                f"usually arrives with Docker Desktop — enable Kubernetes "
+                f"there, or create a cluster with kind, minikube or k3s.")
+
     def version(self):
         if not self.available():
             return ""
@@ -110,6 +131,9 @@ class KubernetesProvider(Provider):
                      Column("phase", "Phase"), Column("node", "Node"),
                      Column("restarts", "Restarts")],
             command=self.shown(argv))
+        if not self.targets():
+            listing.error = self.unavailable_reason()
+            return listing
         if not ok:
             listing.error = text
             return listing

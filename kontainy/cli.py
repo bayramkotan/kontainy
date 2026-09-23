@@ -41,6 +41,7 @@ TECH_ALIASES = {
     "libvirt": "libvirt", "kvm": "libvirt", "qemu": "libvirt",
     "virsh": "libvirt",
     "hyperv": "hyperv", "hyper-v": "hyperv",
+    "vmware": "vmware", "vmrun": "vmware", "fusion": "vmware",
     "incus": "incus", "lxd": "lxd",
 }
 
@@ -129,13 +130,20 @@ def run_action(action, args, provider=None) -> int:
 
     if provider is not None:
         action = provider.prepare(action)
+    from .utils import logs
     shown = action.display() or "(nothing to run)"
-    print(("\u26a0 " if action.destructive else "") + action.label)
-    for line in shown.splitlines():
-        print(f"  $ {line}")
+    # The label carries its own symbol for the buttons ("■  Stop"); the
+    # banner adds one of its own, so the label goes in bare.
+    title = re.sub(r"^[^\w]+\s*", "", action.label).strip() or action.label
+    details = []
     if action.explanation and not Out.quiet:
-        for line in action.explanation.splitlines():
-            print(f"  {line}" if line.strip() else "")
+        import textwrap
+        for paragraph in action.explanation.splitlines():
+            details += textwrap.wrap(paragraph, 66) or [""]
+    logs.banner(title, "warning" if action.destructive else "start",
+                details, record=False)
+    for line in shown.splitlines():
+        logs.banner_command(line, action.id)
     if action.scope == NONE:
         return 0
     if action.scope == SHELL:
@@ -158,6 +166,8 @@ def run_action(action, args, provider=None) -> int:
         text = (result.stdout or result.stderr or "").strip()
         if text:
             print(text)
+        (logs.banner_success if result.ok else logs.banner_error)(
+            title + (" \u2014 done" if result.ok else " \u2014 failed"))
         return 0 if result.ok else 1
 
     argv = list(action.command)
@@ -177,6 +187,10 @@ def run_action(action, args, provider=None) -> int:
     except FileNotFoundError:
         return _fail(f"{argv[0]}: not found", 127)
     history().add(" ".join(argv), note=action.id, ok=code == 0)
+    if code == 0:
+        logs.banner_success(f"{title} \u2014 done")
+    else:
+        logs.banner_error(f"{title} \u2014 exit {code}")
     return code
 
 

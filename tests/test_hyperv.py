@@ -108,3 +108,49 @@ def test_hyperv_is_windows_only():
     from kontainy.core import registry
     assert hyperv.HyperVProvider.platforms == ("windows",)
     assert registry.by_id("hyperv").platforms == ("windows",)
+
+
+def test_a_cmdlet_error_is_a_failure_even_though_powershell_exits_zero(monkeypatch):
+    """PowerShell returns 0 for a non-terminating error, so the exit code
+    said the probe had worked while the text said permission denied — and
+    kontainy showed Hyper-V as installed on a machine without it."""
+    import platform as _platform
+    monkeypatch.setattr(_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(hyperv, "cli_text", fake_ps(
+        f"{hyperv.MARK} You do not have the required permission.", ok=True))
+    provider = hyperv.HyperVProvider()
+    assert provider.available() is False
+    assert provider.version() == ""
+    assert "Hyper-V Administrators" in provider.unavailable_reason()
+
+
+def test_the_module_alone_is_not_hyperv(monkeypatch):
+    """WSL 2 and VMware turn on the Windows hypervisor platform and the
+    Hyper-V PowerShell module comes with it. A machine with the module but
+    no Hyper-V reported itself as installed, in green, with a version."""
+    import platform as _platform
+    monkeypatch.setattr(_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(hyperv, "cli_text", fake_ps(
+        "Get-VMHost : The operation failed because the file was not found.",
+        ok=False))
+    provider = hyperv.HyperVProvider()
+    assert provider.available() is False
+    assert "not enabled" in provider.unavailable_reason()
+
+
+def test_a_permission_refusal_is_told_apart_from_a_missing_feature(monkeypatch):
+    import platform as _platform
+    monkeypatch.setattr(_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(hyperv, "cli_text", fake_ps(
+        "You do not have the required permission to complete this task.",
+        ok=False))
+    provider = hyperv.HyperVProvider()
+    assert provider.available() is False
+    assert "Hyper-V Administrators" in provider.unavailable_reason()
+
+
+def test_hyperv_that_answers_is_available(monkeypatch):
+    import platform as _platform
+    monkeypatch.setattr(_platform, "system", lambda: "Windows")
+    monkeypatch.setattr(hyperv, "cli_text", fake_ps("DESKTOP-ABC"))
+    assert hyperv.HyperVProvider().available() is True

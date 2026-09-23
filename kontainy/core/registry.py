@@ -101,6 +101,10 @@ class Tool:
     learn_category: str = ""
     docs: str = ""
     note: str = ""
+    # A binary that opens a window when run. Never started to read a
+    # version: vmconnect.exe answers `--version` with a usage DIALOG, which
+    # kontainy popped on Bayram's screen while probing Hyper-V.
+    gui_only: bool = False
     # Where the tool can run at all. KVM, QEMU's accelerated mode, libvirt,
     # LXC and the systemd tools do not exist on Windows; listing them there
     # offers something that can never work.
@@ -119,7 +123,7 @@ class Tool:
 
     def version(self) -> str:
         path = self.binary_path()
-        if not path:
+        if not path or self.gui_only:
             return ""
         result = run([path] + self.version_args, timeout=8.0, record=False)
         text = (result.stdout or result.stderr).strip()
@@ -362,6 +366,7 @@ VM_TOOLS = [
       "Windows' own hypervisor, built into Pro, Enterprise and Education. "
       "Managed entirely from PowerShell.",
       binaries=["vmconnect"],
+      gui_only=True,
       windows=("powershell -NoProfile -Command Enable-WindowsOptionalFeature "
                "-Online -FeatureName Microsoft-Hyper-V -All"),
       docs="https://learn.microsoft.com/virtualization/hyper-v-on-windows/",
@@ -369,6 +374,17 @@ VM_TOOLS = [
            "while it is on, VirtualBox and VMware run on top of it through "
            "the Windows Hypervisor Platform — slower, and some older "
            "versions refuse to start at all."),
+
+    T("vmware", "VMware Workstation / Fusion", "Virtual machines",
+      "Desktop virtualisation from VMware. Workstation Pro and Fusion are "
+      "free for personal use; both carry the vmrun tool kontainy drives.",
+      binaries=["vmrun"],
+      windows="winget install -e --id VMware.WorkstationPro",
+      macos="brew install --cask vmware-fusion",
+      docs="https://knowledge.broadcom.com/external/article?legacyId=2057907",
+      note="On Linux it is a .bundle installer from Broadcom, not a "
+           "package. vmrun is not put on PATH; kontainy also looks in "
+           "VMware's own install directories."),
 
     T("virtualbox", "VirtualBox", "Virtual machines",
       "Oracle's type-2 hypervisor. Manageable from the command line with "

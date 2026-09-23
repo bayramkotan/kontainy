@@ -169,33 +169,22 @@ _logger: logging.Logger | None = None
 
 
 def log() -> logging.Logger:
-    global _logger
-    if _logger is not None:
-        return _logger
+    """The application logger.
 
-    logger = logging.getLogger("kontainy")
-    logger.setLevel(logging.DEBUG)
-    if not logger.handlers:
-        fmt = logging.Formatter(
-            "%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S")
-        try:
-            fh = logging.FileHandler(data_dir() / LOG_FILE, encoding="utf-8")
-            fh.setLevel(logging.DEBUG)
-            fh.setFormatter(fmt)
-            logger.addHandler(fh)
-        except OSError:
-            pass
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.WARNING)
-        sh.setFormatter(fmt)
-        logger.addHandler(sh)
-    _logger = logger
-    return logger
+    The setup — rotation, crash reports, Qt's own messages — lives in
+    utils/logs.py, modelled on VenvStudio's. This stays as the name every
+    module already imports.
+    """
+    global _logger
+    if _logger is None:
+        from . import logs
+        _logger = logs.setup()
+    return _logger
 
 
 def log_path() -> Path:
-    return data_dir() / LOG_FILE
+    from . import logs
+    return logs.log_path()
 
 
 # ---------------------------------------------------------------------------

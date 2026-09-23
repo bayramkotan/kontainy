@@ -43,7 +43,7 @@ def _summarise(provider) -> dict:
         out["active"] = active
         listing = provider.objects(active)
         if listing.error:
-            out["error"] = listing.error.splitlines()[0][:120]
+            out["error"] = listing.error.strip()
         else:
             out["objects"] = len(listing.rows)
     for unit, user, _why in (provider.services if OS_KIND == "linux" else []):
@@ -124,6 +124,29 @@ class OverviewPage(Page):
         detail.setTextFormat(Qt.RichText)
         layout.addWidget(detail, 1)
 
+        # The tool's own words go behind an arrow: useful when something is
+        # wrong, noise on a card for a technology the user may never install.
+        more = QPushButton("\u25b8  Details")
+        more.setObjectName("secondary")
+        more.setCursor(Qt.PointingHandCursor)
+        more.setCheckable(True)
+        more.hide()
+        more_row = QHBoxLayout()
+        more_row.addWidget(more)
+        more_row.addStretch()
+        layout.addLayout(more_row)
+
+        raw = QLabel("")
+        raw.setWordWrap(True)
+        raw.setObjectName("cardRaw")
+        raw.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        raw.hide()
+        layout.addWidget(raw)
+        more.toggled.connect(
+            lambda on, b=more, r=raw: (r.setVisible(on),
+                                       b.setText(("\u25be  Details" if on
+                                                  else "\u25b8  Details"))))
+
         row = QHBoxLayout()
         button = QPushButton("Open \u2192")
         button.setCursor(Qt.PointingHandCursor)
@@ -137,7 +160,7 @@ class OverviewPage(Page):
         frame.mousePressEvent = (
             lambda _e, pid=provider.id: self.open_page.emit(f"platform-{pid}"))
         return {"frame": frame, "title": title, "status": status,
-                "detail": detail, "button": button}
+                "detail": detail, "button": button, "more": more, "raw": raw}
 
     # --- data ----------------------------------------------------------------
     def on_shown(self) -> None:
@@ -167,6 +190,10 @@ class OverviewPage(Page):
             provider = next(p for p in self.providers if p.id == info["id"])
             if card is None:
                 continue
+            card["more"].setChecked(False)
+            card["more"].setVisible(bool(info["error"]))
+            card["raw"].setText(info["error"])
+            card["raw"].hide()
             if not info["available"]:
                 card["status"].setText(
                     f"<span style='color:{c['fg_muted']}'>\u25cb not "
@@ -178,8 +205,9 @@ class OverviewPage(Page):
                 continue
             installed += 1
             card["button"].setText("Open \u2192")
+            colour = c["warning"] if info["error"] else c["success"]
             card["status"].setText(
-                f"<span style='color:{c['success']}'>\u25cf "
+                f"<span style='color:{colour}'>\u25cf "
                 f"{info['version'] or 'installed'}</span>")
             lines = []
             active = info["active"]
@@ -194,8 +222,10 @@ class OverviewPage(Page):
                                             provider.object_noun_plural)
                              + "</b>")
             elif info["error"]:
+                from ...core.providers.base import summarise_error
                 lines.append(f"<span style='color:{c['warning']}'>"
-                             f"\u26a0 {info['error']}</span>")
+                             f"\u26a0 {summarise_error(info['error'])}"
+                             f"</span>")
             if info["services_total"]:
                 up, total = info["services_up"], info["services_total"]
                 colour = c["success"] if up else c["warning"]
@@ -222,3 +252,7 @@ class OverviewPage(Page):
                 f" font-weight: bold;")
             for key in ("status", "detail"):
                 card[key].setStyleSheet(f"font-size: {c['fs_base'] + 1}px;")
+            card["raw"].setStyleSheet(
+                f"color: {c['fg_muted']}; font-size: {c['fs_base'] - 1}px;"
+                f" font-family: \"Cascadia Code\", \"Fira Code\", "
+                f"\"JetBrains Mono\", \"Consolas\", monospace;")
