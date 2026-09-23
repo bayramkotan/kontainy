@@ -37,6 +37,7 @@ KEEP_CRASHES_FOR_DAYS = 30
 ROTATION = (2 * 1024 * 1024, 5)
 
 _logger: logging.Logger | None = None
+_console_handler: list = []
 _session = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
@@ -83,6 +84,40 @@ def session_context() -> dict:
     return context
 
 
+def console_level() -> int:
+    """How much kontainy says on screen."""
+    name = (os.environ.get("KY_LOG_LEVEL") or "").upper()
+    if name in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        return getattr(logging, name)
+    interactive = bool(getattr(sys.stderr, "isatty", lambda: False)())
+    return logging.INFO if interactive else logging.WARNING
+
+
+def set_console_level(level: int) -> None:
+    for handler in _console_handler:
+        handler.setLevel(level)
+
+
+def timer(what: str, level: int = logging.INFO):
+    """Log how long something took — VenvStudio times its page builds too.
+
+        with logs.timer("Overview"):
+            ...
+    """
+    import contextlib
+    import time as _time
+
+    @contextlib.contextmanager
+    def _run():
+        started = _time.perf_counter()
+        try:
+            yield
+        finally:
+            setup().log(level, "%s: %.0f ms", what,
+                        (_time.perf_counter() - started) * 1000)
+    return _run()
+
+
 def setup() -> logging.Logger:
     """The one logger, with rotation, a file and a console handler."""
     global _logger
@@ -106,9 +141,14 @@ def setup() -> logging.Logger:
         except OSError:
             pass
         console = logging.StreamHandler()
-        console.setLevel(logging.WARNING)
+        # Started from a terminal, kontainy narrates what it is doing: which
+        # page is building, which engine answered, how long it took. Piped
+        # or redirected, only warnings, so a script's output stays clean.
+        # KY_LOG_LEVEL overrides both.
+        console.setLevel(console_level())
         console.setFormatter(ConsoleFormatter())
         logger.addHandler(console)
+        _console_handler.append(console)
     _logger = logger
     return logger
 

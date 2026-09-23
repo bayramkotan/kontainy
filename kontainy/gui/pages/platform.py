@@ -60,6 +60,9 @@ def _clear(layout) -> None:
 
 def _probe(provider) -> dict:
     """Everything the page needs, gathered off the GUI thread."""
+    from ...utils.config import log
+    log().info("%s: reading %s\u2026", provider.name,
+               provider.target_noun_plural.lower())
     available = provider.available()
     targets = provider.targets() if available else []
     active = next((t for t in targets if t.active), None)
@@ -585,10 +588,12 @@ class PlatformPage(Page):
         self._fill_sections(state.get("sections") or {})
         self._fill_resolution(state.get("resolution") or [])
         self._fill_objects(listing)
-        self.status.emit(
-            f"{provider.name}: {len(state['targets'])} "
-            f"{provider.target_noun_plural.lower()}, {count} "
-            f"{provider.object_noun_plural.lower()}")
+        summary = (f"{provider.name}: {len(state['targets'])} "
+                   f"{provider.target_noun_plural.lower()}, {count} "
+                   f"{provider.object_noun_plural.lower()}")
+        self.status.emit(summary)
+        from ...utils.config import log
+        log().info("%s", summary)
 
     def _fill_targets(self, targets: list) -> None:
         c = self.colors()

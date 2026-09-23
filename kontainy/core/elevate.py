@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import logging
 import subprocess
 from dataclasses import dataclass, field
 
@@ -129,7 +130,11 @@ def run_streaming(command: list, on_line, *, timeout: float = 900.0,
     result = CommandResult(shown, proc.returncode or 0, "\n".join(lines), "")
     if record:
         history().add(shown, note=note, ok=result.ok)
-    log().info("ran (%s): %s", result.returncode, shown)
+    # A command the user asked for is news; a probe is not. `record` already
+    # tells them apart: it is what puts a command into the history the user
+    # can read back.
+    log().log(logging.INFO if record else logging.DEBUG,
+              "ran (%s): %s", result.returncode, shown)
     return result
 
 
@@ -153,7 +158,11 @@ def run(command: list, *, timeout: float = 60.0, note: str = "",
 
     if record:
         history().add(shown, note=note, ok=result.ok)
-    log().info("ran (%s): %s", result.returncode, shown)
+    # A command the user asked for is news; a probe is not. `record` already
+    # tells them apart: it is what puts a command into the history the user
+    # can read back.
+    log().log(logging.INFO if record else logging.DEBUG,
+              "ran (%s): %s", result.returncode, shown)
     return result
 
 
@@ -203,5 +212,5 @@ def run_elevated(command: list, *, timeout: float = 120.0, note: str = "",
 
     if record:
         history().add(f"sudo {shown}", note=note, ok=result.ok)
-    log().info("ran elevated (%s): %s", result.returncode, shown)
+    log().info("ran elevated (%s): %s", result.returncode, shown)  # always
     return result

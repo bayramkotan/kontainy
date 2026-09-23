@@ -143,3 +143,49 @@ def test_qt_messages_reach_the_log(temp_logs):
     if getattr(__import__("PySide6"), "__version__", "") == "0.0.0-stub":
         pytest.skip("needs the real PySide6")
     assert logs.install_qt_handler() is True
+
+
+def test_a_terminal_gets_the_narration_a_pipe_does_not(monkeypatch):
+    """Started from a terminal kontainy says what it is doing; redirected,
+    only warnings, so a script's output stays clean."""
+    import logging as _logging
+
+    class Tty:
+        @staticmethod
+        def isatty():
+            return True
+
+    class Pipe:
+        @staticmethod
+        def isatty():
+            return False
+    monkeypatch.delenv("KY_LOG_LEVEL", raising=False)
+    monkeypatch.setattr(logs.sys, "stderr", Tty)
+    assert logs.console_level() == _logging.INFO
+    monkeypatch.setattr(logs.sys, "stderr", Pipe)
+    assert logs.console_level() == _logging.WARNING
+    monkeypatch.setenv("KY_LOG_LEVEL", "DEBUG")
+    assert logs.console_level() == _logging.DEBUG
+
+
+def test_a_probe_is_not_announced_like_a_users_command(monkeypatch, tmp_path):
+    """Every systemctl probe at startup was printed as though the user had
+    run it. `record` already tells a user's command from a probe."""
+    import sys as _sys
+    from kontainy.core import elevate
+    lines = []
+    monkeypatch.setattr(elevate, "log", lambda: type(
+        "L", (), {"log": lambda self, level, *a: lines.append(level),
+                  "info": lambda self, *a: lines.append(20),
+                  "debug": lambda self, *a: lines.append(10)})())
+    elevate.run([_sys.executable, "-c", "pass"], record=False)
+    elevate.run([_sys.executable, "-c", "pass"], record=True)
+    assert lines == [10, 20], "probe debug, user command info"
+
+
+def test_timing_is_reported(caplog):
+    import logging as _logging
+    with caplog.at_level(_logging.INFO, logger="kontainy"):
+        with logs.timer("Something"):
+            pass
+    assert any("Something" in record.message for record in caplog.records)

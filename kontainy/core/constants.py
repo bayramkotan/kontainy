@@ -10,7 +10,7 @@ yükseltilir — sormak da yok, beklenir.
 """
 
 APP_NAME = "kontainy"
-APP_VERSION = "0.0.8"
+APP_VERSION = "0.0.9"
 APP_TAGLINE = "Containers and virtualisation \u2014 in one window, or one command"
 APP_REPO = "https://github.com/bayramkotan/kontainy"
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontainy"
-version = "0.0.8"
+version = "0.0.9"
 description = "Every Docker and Podman setting, in one interface - a desktop manager for containers, with diagnostics and built-in learning"
 # PyPI gets its own README, as VenvStudio does: the same text without
 # the logo, the screenshots and the navigation links, which need the

@@ -56,7 +56,28 @@ def _summarise(provider) -> dict:
 
 
 def _probe_all(providers: list) -> list:
-    return [_summarise(p) for p in providers]
+    """Probe every technology, saying what each one answered.
+
+    Startup used to be silent in the terminal: kontainy was busy asking
+    seven tools for their version and the user saw nothing at all.
+    """
+    import time
+    from ...utils.config import log
+    out = []
+    for provider in providers:
+        started = time.perf_counter()
+        info = _summarise(provider)
+        took = (time.perf_counter() - started) * 1000
+        if info["available"]:
+            log().info("%-14s %s \u00b7 %s \u00b7 %.0f ms", provider.name,
+                       info["version"] or "installed",
+                       (_count(info["objects"], provider.object_noun_plural)
+                        if info["objects"] is not None else "unreachable"),
+                       took)
+        else:
+            log().info("%-14s not installed \u00b7 %.0f ms", provider.name, took)
+        out.append(info)
+    return out
 
 
 class OverviewPage(Page):

@@ -157,6 +157,8 @@ def cli_text(argv: list, timeout: float = 15.0) -> tuple:
     Decodes UTF-16 as well as UTF-8, because `wsl.exe` writes UTF-16LE to a
     pipe and every line comes back interleaved with NUL bytes otherwise.
     """
+    from ...utils.config import log
+    log().debug("$ %s", " ".join(argv))
     try:
         proc = subprocess.run(argv, capture_output=True, timeout=timeout)
     except FileNotFoundError:

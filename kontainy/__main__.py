@@ -196,11 +196,24 @@ def gui_main() -> int:
     from kontainy.utils import logs
 
     logs.install_qt_handler()          # Qt's warnings into kontainy's log
+    import platform as _platform
+    import time as _time
+    started = _time.perf_counter()
+    logs.banner(f"{APP_NAME} {APP_VERSION}", "welcome",
+                [f"{_platform.system()} {_platform.machine()} \u00b7 "
+                 f"Python {sys.version.split()[0]}",
+                 f"Log: {logs.log_path()}"], record=False)
+    log = logs.setup()
+    log.info("Starting the window\u2026")
+
     app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    window = MainWindow(version=APP_VERSION)
+    with logs.timer("Window built"):
+        window = MainWindow(version=APP_VERSION)
     window.show()
+    log.info("Ready in %.0f ms \u2014 %d pages",
+             (_time.perf_counter() - started) * 1000, len(window.pages))
     return app.exec()
 
 

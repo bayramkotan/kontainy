@@ -76,7 +76,7 @@ class CommandStrip(QFrame):
         self.label.setText(f"$ {command}")
         if record:
             history().add(command, engine=engine, note=note)
-        log().info("CLI karşılığı: %s", command)
+        log().debug("CLI equivalent: %s", command)
 
     def _copy(self) -> None:
         if self._command:

@@ -315,6 +315,8 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         for i, button in enumerate(self.nav_buttons):
             button.setChecked(i == index)
         page = self.page_list[index] if index < len(self.page_list) else None
+        if page is not None:
+            log().info("Page: %s", page.TITLE)
         if page is not None and page.NAME not in self._shown:
             self._shown.add(page.NAME)
             page.on_shown()
