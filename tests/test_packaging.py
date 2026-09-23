@@ -47,3 +47,32 @@ def test_console_commands_are_declared():
     for name in ("kontainy", "ky", "kty"):
         assert re.search(rf'^{name}\s*=\s*"kontainy\.__main__:main"',
                          PYPROJECT, re.M), f"missing console command: {name}"
+
+
+def test_pypi_gets_its_own_readme():
+    """PyPI shows README_PYPI.md, which carries no images: it has no
+    repository context, so a relative path is a broken image there."""
+    import re
+    assert 'file = "README_PYPI.md"' in PYPROJECT
+    pypi_readme = ROOT / "README_PYPI.md"
+    assert pypi_readme.is_file()
+    text = pypi_readme.read_text(encoding="utf-8")
+    relative = re.findall(r'<img src="(?:assets|docs)/|!\[[^]]*\]\((?:assets|docs)/',
+                          text)
+    assert not relative, f"relative images in README_PYPI.md: {relative}"
+    assert "# 🐳 kontainy" in text
+    assert "pip install kontainy" in text
+
+
+def test_both_readmes_describe_the_same_program():
+    """They diverge in presentation, not in content: a section added to one
+    and forgotten in the other is how they drift apart."""
+    github = (ROOT / "README.md").read_text(encoding="utf-8")
+    pypi = (ROOT / "README_PYPI.md").read_text(encoding="utf-8")
+    for heading in ("## 📦 Install", "## 🧭 Technologies", "## ✨ Features",
+                    "### CLI", "## 🔐 Privilege model", "## 📝 License"):
+        assert heading in github, f"{heading} missing from README.md"
+        assert heading in pypi, f"{heading} missing from README_PYPI.md"
+    # Screenshots need the repository; they stay out of the PyPI one.
+    assert "## 📸 Screenshots" in github
+    assert "## 📸 Screenshots" not in pypi

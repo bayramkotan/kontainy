@@ -1,42 +1,14 @@
-<!-- Image paths must be absolute raw.githubusercontent URLs, not relative.
-     GitHub resolves relative paths against the repository; PyPI has no
-     repository context and renders them as broken images. -->
-<p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/icon.png" alt="kontainy" width="128" height="128">
-</p>
+<div align="center">
 
-<h1 align="center">📦 kontainy</h1>
+# 🐳 kontainy
 
-<p align="center">
-  <strong>Containers and virtualisation — in one window, or one command</strong><br>
-  <sub>Docker, Podman, Kubernetes, KVM/libvirt, Hyper-V, Incus and LXD. Every target selectable, every setting explained, every command shown before it runs.</sub>
-</p>
+**Containers and virtualisation — in one window, or one command**
+Docker, Podman, Kubernetes, KVM/libvirt, Hyper-V, Incus and LXD. Every target
+selectable, every setting explained, every command shown before it runs.
 
-<p align="center">
-  <a href="https://github.com/bayramkotan/kontainy/releases/latest">
-    <img src="https://img.shields.io/github/v/release/bayramkotan/kontainy?style=for-the-badge&color=89b4fa&logo=github" alt="Release">
-  </a>
-  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-f9e2af?style=for-the-badge" alt="Platform">
-  <a href="https://github.com/bayramkotan/kontainy/stargazers">
-    <img src="https://img.shields.io/github/stars/bayramkotan/kontainy?style=for-the-badge&color=f5c2e7&logo=github" alt="Stars">
-  </a>
-</p>
+![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-f9e2af?style=for-the-badge)
 
-<p align="center">
-  <a href="#-why-kontainy-exists">Why</a> •
-  <a href="#-educational-by-design">Educational</a> •
-  <a href="#-install">Install</a> •
-  <a href="#-technologies">Technologies</a> •
-  <a href="#-features">Features</a> •
-  <a href="#-the-settings-catalogue">Config Catalog</a> •
-  <a href="#-diagnostics">Diagnostics</a> •
-  <a href="#-templates">Templates</a> •
-  <a href="#-learn">Learn</a> •
-  <a href="#-privilege-model">Privileges</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#cli">CLI</a> •
-  <a href="#-build-from-source">Build</a>
-</p>
+</div>
 
 ---
 
@@ -56,7 +28,6 @@ it finds, separately, and shows them all in one table with an Engine column. A
 container is never lost — you can see which engine holds it.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/docker.png" alt="Docker — the active context in a dropdown, with tabs for contexts, containers, install, services, shell and settings" width="850">
 </p>
 
 The `docker` CLI resolves its target through five layers, and the top one wins:
@@ -138,7 +109,6 @@ The point is not convenience. The point is that you should be able to do the
 same thing **without kontainy** afterwards.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/create_container.png" alt="Create Container — live command preview growing as options are set" width="850">
 </p>
 
 This runs through the whole application:
@@ -319,7 +289,6 @@ The equivalent of a linter for your container setup. Every rule says three
 things: what was found, why it happens, and the command that fixes it.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/diagnostics.png" alt="Diagnostics — findings with explanation and fix command" width="850">
 </p>
 
 **19 rules**, none of which need root to detect:
@@ -618,20 +587,6 @@ web
 
 ---
 
-## 📸 Screenshots
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/catalog.png" alt="Config Catalog — declared value, effective value and the override chain" width="850">
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/learn.png" alt="Learn — collapsible topic cards with highlighted snippets" width="850">
-</p>
-<p align="center">
-  <img src="https://raw.githubusercontent.com/bayramkotan/kontainy/main/assets/screenshots/containers.png" alt="Containers — every engine in one table" width="850">
-</p>
-
----
-
 ## 🏗️ Build from source
 
 Builds are made in CI, on each platform's own runner — there is no
@@ -671,5 +626,17 @@ MIT — see [LICENSE](https://github.com/bayramkotan/kontainy/blob/main/LICENSE)
 ⭐ **If kontainy helps you, consider [giving it a star](https://github.com/bayramkotan/kontainy)!** ⭐
 
 [🐛 Report Bug](https://github.com/bayramkotan/kontainy/issues) · [💡 Request Feature](https://github.com/bayramkotan/kontainy/issues)
+
+</div>
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [Bayram Kotan](https://github.com/bayramkotan)**
+
+[GitHub](https://github.com/bayramkotan/kontainy) · [Releases](https://github.com/bayramkotan/kontainy/releases) · [Issues](https://github.com/bayramkotan/kontainy/issues) · [Screenshots](https://github.com/bayramkotan/kontainy#-screenshots)
+
+⭐ **If kontainy helps you, give it a star!** ⭐
 
 </div>

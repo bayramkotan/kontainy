@@ -510,7 +510,10 @@ jobs:
           # as a broken image there while looking fine on GitHub. Caught the
           # hard way on 0.0.2, where the logo and all six screenshots were
           # broken on the project page.
-          if grep -nE '<img src="(assets|docs)/|!\[[^]]*\]\((assets|docs)/' README.md; then
+          # The file that goes to PyPI is README_PYPI.md, so that is the
+          # one this guards: PyPI has no repository context and shows a
+          # broken image for every relative path.
+          if grep -nE '<img src="(assets|docs)/|!\[[^]]*\]\((assets|docs)/' README_PYPI.md; then
             echo "::error::README uses relative image paths; PyPI cannot "
             echo "::error::resolve them. Use absolute raw.githubusercontent URLs."
             exit 1

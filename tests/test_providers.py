@@ -39,6 +39,23 @@ WSL_LIST = ("  NAME              STATE           VERSION\n"
             "  podman-machine-default Stopped    2\n")
 
 
+@pytest.fixture(autouse=True)
+def local_tools(monkeypatch):
+    """These tests are about parsing a Linux tool's own output, so the tools
+    run here, on this machine.
+
+    Without this they fail on Windows, and only there: a Windows machine with
+    WSL runs the Linux tools inside it, so every command arrives wrapped in
+    `wsl -d Ubuntu -- ...` and the faked CLI below no longer recognises it —
+    and libvirt's default connection is kept in kontainy's settings instead
+    of the distribution's libvirt.conf. Both are correct behaviour; the
+    tests simply have to say where they stand.
+    """
+    from kontainy.core import hosts, registry
+    monkeypatch.setattr(registry, "OS_KIND", "linux")
+    monkeypatch.setattr(hosts, "on_windows", lambda: False)
+
+
 def fake_cli(responses: dict):
     """cli_text replacement keyed by the joined argv prefix."""
     def run(argv, timeout=15.0):
