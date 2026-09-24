@@ -226,6 +226,10 @@ class Provider:
     icon = ""
     binary = ""
     target_noun = "Target"          # "Context", "Connection", "Remote" ...
+    # What a target's address IS, for the second dropdown in the top bar.
+    # Empty means the address carries nothing worth a dropdown of its own —
+    # a single local host whose "address" is the words "this computer".
+    address_noun = ""
     target_noun_plural = "Targets"
     object_noun_plural = "Objects"  # "Containers", "Pods", "Domains" ...
     tool_ids: list = []             # registry entries for the Install tab

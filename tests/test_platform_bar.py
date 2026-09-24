@@ -130,3 +130,87 @@ def test_the_button_says_active_for_the_active_one(docker_page):
     app.processEvents()
     assert not page.activate_btn.isEnabled()
     assert "Active" in page.activate_btn.text()
+
+
+def test_the_address_dropdown_only_where_the_address_says_something():
+    """Bayram, 2026-09-24: "Bu socket ve context sadece docker'da olması
+    gerekmiyor mu?" — Hyper-V and VMware have one local host whose address
+    is the words "this computer"; a dropdown for that is furniture."""
+    from kontainy.core.providers import PROVIDERS
+    nouns = {p.id: p.address_noun for p in PROVIDERS}
+    assert nouns["docker"] == "Socket"
+    assert nouns["libvirt"] == "URI"
+    assert nouns["podman"] and nouns["incus"] and nouns["lxd"]
+    assert nouns["hyperv"] == "" and nouns["vmware"] == ""
+
+
+def test_one_address_for_every_target_needs_no_dropdown(docker_page,
+                                                         monkeypatch):
+    """Two contexts on the same socket say nothing by their address."""
+    from kontainy.core.providers import base
+    from kontainy.core.providers.containers import DockerProvider
+    page, app, _state = docker_page
+    monkeypatch.setattr(DockerProvider, "targets", lambda self: [
+        base.Target("one", "unix:///var/run/docker.sock", True),
+        base.Target("two", "unix:///var/run/docker.sock", False)])
+    page.refresh()
+    for _ in range(100):
+        app.processEvents()
+        time.sleep(0.02)
+        if page.selector.count() == 2:
+            break
+    assert page.socket_box.isVisible() is False
+
+
+def test_a_shared_address_is_listed_once(docker_page, monkeypatch):
+    """Two contexts on one socket listed that socket twice, so the second
+    entry was a choice that meant nothing. (Bayram's screenshot, 0.0.9.)"""
+    from kontainy.core.providers import base
+    from kontainy.core.providers.containers import DockerProvider
+    page, app, _state = docker_page
+    sock = "unix:///home/me/.docker/desktop/docker.sock"
+    monkeypatch.setattr(DockerProvider, "targets", lambda self: [
+        base.Target("default", sock, True),
+        base.Target("desktop-linux", sock, False),
+        base.Target("podman", "unix:///run/user/1000/podman/podman.sock",
+                    False)])
+    page.refresh()
+    for _ in range(100):
+        app.processEvents()
+        time.sleep(0.02)
+        if page.selector.count() == 3:
+            break
+    entries = [page.address_selector.itemText(i)
+               for i in range(page.address_selector.count())]
+    assert len(entries) == 2, entries
+    assert "default, desktop-linux" in entries[0], "say whose socket it is"
+
+
+def test_selecting_a_shared_address_keeps_the_chosen_context(docker_page,
+                                                              monkeypatch):
+    from kontainy.core.providers import base
+    from kontainy.core.providers.containers import DockerProvider
+    page, app, _state = docker_page
+    sock = "unix:///var/run/docker.sock"
+    monkeypatch.setattr(DockerProvider, "targets", lambda self: [
+        base.Target("default", sock, True),
+        base.Target("desktop-linux", sock, False)])
+    page.refresh()
+    # Wait for the NEW targets, not merely for two entries: the page starts
+    # with two of its own, and checking the count alone measured the old
+    # state and made this test lie twice.
+    for _ in range(150):
+        app.processEvents()
+        time.sleep(0.02)
+        if page.address_selector.count() == 1 and \
+                sock in page.address_selector.itemText(0):
+            break
+    assert page.address_selector.count() == 1
+    page.selector.setCurrentIndex(1)
+    assert page.selector.currentText() == "desktop-linux"
+    # Called directly rather than through the widget: a refresh landing
+    # between the two clicks resets the selection and the test would be
+    # measuring the timing, not the rule.
+    page._address_changed(0)                   # the socket they share
+    assert page.selector.currentText() == "desktop-linux", \
+        "picking the socket they share must not change the context"

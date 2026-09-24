@@ -248,7 +248,7 @@ class PlatformPage(Page):
         socket_bar = QHBoxLayout(socket_box)
         socket_bar.setContentsMargins(0, 0, 0, 0)
         socket_bar.setSpacing(8)
-        socket_label = QLabel("Socket:")
+        socket_label = QLabel(f"{provider.address_noun}:")
         socket_label.setProperty("noWrap", True)
         socket_bar.addWidget(socket_label)
         self.address_selector = QComboBox()
@@ -265,6 +265,11 @@ class PlatformPage(Page):
         self.address_selector.currentIndexChanged.connect(
             self._address_changed)
         socket_bar.addWidget(self.address_selector)
+        self.socket_box = socket_box
+        # Only where the address says something the name does not. Hyper-V
+        # and VMware have one local host whose address is the words "this
+        # computer"; a dropdown for that is furniture.
+        socket_box.setVisible(bool(provider.address_noun))
         self.toolbar.addWidget(socket_box)
 
         self.activate_btn = QPushButton("\u2714  Activate")
@@ -587,17 +592,31 @@ class PlatformPage(Page):
         self.selector.clear()
         self.address_selector.clear()
         active_index = 0
+        # One entry per ADDRESS, not per target: two contexts can point at
+        # the same socket, and listing it twice invites a choice that means
+        # nothing. Where several share one, their names are shown with it.
+        by_address = {}
+        for target in state["targets"]:
+            by_address.setdefault(target.address or "\u2014", []).append(target)
+        for address, owners in by_address.items():
+            label = address
+            if len(owners) > 1:
+                label += f"   ({', '.join(t.name for t in owners)})"
+            self.address_selector.addItem(label, owners[0].name)
+
         for index, target in enumerate(state["targets"]):
-            self.address_selector.addItem(target.address or "\u2014",
-                                          target.name)
             # Only the name: an address in the dropdown got cut off mid-path.
             # The full address is on the line underneath and in the tooltip.
             self.selector.addItem(target.name, target.name)
             self.selector.setItemData(index, target.address, Qt.ToolTipRole)
             if target.active:
                 active_index = index
+        # Even where an address is meaningful in general, it is not worth a
+        # dropdown when every target reports the same one.
+        self.socket_box.setVisible(bool(self.PROVIDER.address_noun)
+                                   and len(by_address) > 1)
         self.selector.setCurrentIndex(active_index)
-        self.address_selector.setCurrentIndex(active_index)
+        self._sync_address_to_selector()
         self._filling = False
         self._update_activate()
 
@@ -944,6 +963,19 @@ class PlatformPage(Page):
             return None
         return self.state["targets"][row]
 
+    def _sync_address_to_selector(self) -> None:
+        """Point the address dropdown at whatever the selected target uses."""
+        target = self._target(self.selector.currentData())
+        if target is None:
+            return
+        wanted = target.address or "\u2014"
+        for index in range(self.address_selector.count()):
+            if self.address_selector.itemText(index).split("   (")[0] == wanted:
+                self._filling = True
+                self.address_selector.setCurrentIndex(index)
+                self._filling = False
+                return
+
     def _selector_changed(self, index: int) -> None:
         """Choosing is not switching.
 
@@ -953,17 +985,24 @@ class PlatformPage(Page):
         """
         if self._filling or index < 0:
             return
-        self._filling = True
-        self.address_selector.setCurrentIndex(index)
-        self._filling = False
+        self._sync_address_to_selector()
         self._preview_selected()
 
     def _address_changed(self, index: int) -> None:
         if self._filling or index < 0:
             return
-        self._filling = True
-        self.selector.setCurrentIndex(index)
-        self._filling = False
+        # An address can belong to several targets; keep the one already
+        # selected if it is one of them, otherwise take the first.
+        name = self.address_selector.itemData(index)
+        current = self._target(self.selector.currentData())
+        chosen_address = self.address_selector.itemText(index).split("   (")[0]
+        if current is not None and (current.address or "\u2014") == chosen_address:
+            return
+        position = self.selector.findData(name)
+        if position >= 0:
+            self._filling = True
+            self.selector.setCurrentIndex(position)
+            self._filling = False
         self._preview_selected()
 
     def _selected_in_bar(self):

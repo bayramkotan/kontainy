@@ -20,6 +20,7 @@ from ..actions import Action, USER
 # ===========================================================================
 class KubernetesProvider(Provider):
     id = "kubernetes"
+    address_noun = "Cluster"
     name = "Kubernetes"
     icon = "\u2638"
     binary = "kubectl"
@@ -194,6 +195,7 @@ def _write_uri_default(uri: str) -> str:
 
 class LibvirtProvider(Provider):
     id = "libvirt"
+    address_noun = "URI"
     name = "KVM / libvirt"
     icon = "\U0001f5a5"
     binary = "virsh"
@@ -449,6 +451,7 @@ class _RemoteProvider(Provider):
 
 class IncusProvider(_RemoteProvider):
     id = "incus"
+    address_noun = "Address"
     name = "Incus"
     icon = "\U0001f9f1"
     binary = "incus"
@@ -462,6 +465,7 @@ class IncusProvider(_RemoteProvider):
 
 class LxdProvider(_RemoteProvider):
     id = "lxd"
+    address_noun = "Address"
     name = "LXD"
     icon = "\U0001f4e6"
     binary = "lxc"

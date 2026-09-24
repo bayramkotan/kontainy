@@ -700,6 +700,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("overview", help="every technology on this machine")
     sub.add_parser("tech", help="the technologies kontainy offers here")
     sub.add_parser("doctor", help="run the diagnostic rules")
+    p = sub.add_parser("report", help="a system report to paste into an issue")
+    p.add_argument("--short", action="store_true",
+                   help="skip the list of installed tools")
     sub.add_parser("scan", help="find every engine and socket")
     sub.add_parser("stats", help="catalogue and rule counts")
 
@@ -791,6 +794,10 @@ def main(argv=None) -> int:
         from . import __main__ as entry
         return {"doctor": entry.cli_doctor, "scan": entry.cli_scan,
                 "stats": entry.cli_stats}[command]()
+    if command == "report":
+        from .core import report as _report
+        print(_report.build(full=not args.short))
+        return 0
     if command == "tools":
         return cmd_tools(args)
     if command == "install":

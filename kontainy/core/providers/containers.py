@@ -10,6 +10,7 @@ from .base import (Field, Listing, Column, Provider, Target, action, cli_text,
 
 class DockerProvider(Provider):
     id = "docker"
+    address_noun = "Socket"
     name = "Docker"
     icon = "\U0001f433"
     binary = "docker"
@@ -124,6 +125,7 @@ class DockerProvider(Provider):
 
 class PodmanProvider(Provider):
     id = "podman"
+    address_noun = "Connection URI"
     name = "Podman"
     icon = "\U0001f9ad"
     binary = "podman"

@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
+    QPlainTextEdit, QTabWidget, QVBoxLayout, QWidget,
     QAbstractItemView, QHeaderView, QLabel, QPushButton, QSplitter,
     QTableWidget, QTableWidgetItem, QTextBrowser,
 )
@@ -37,6 +38,18 @@ class DiagnosticsPage(Page):
         self.count_label = QLabel("—")
         self.toolbar.addWidget(self.count_label)
 
+        self.report_btn = self.add_tool_button(
+            "\U0001f4cb  Copy system report", self._copy_report)
+        self.report_btn.setToolTip(
+            "Everything a bug report needs: versions, platform, which "
+            "technologies answered, which tools are installed.")
+
+        self.tabs = QTabWidget()
+
+        findings = QWidget()
+        findings_layout = QVBoxLayout(findings)
+        findings_layout.setContentsMargins(0, 8, 0, 0)
+
         split = QSplitter(Qt.Horizontal)
 
         self.table = QTableWidget(0, 4)
@@ -53,7 +66,30 @@ class DiagnosticsPage(Page):
         self.detail.setOpenExternalLinks(True)
         split.addWidget(self.detail)
         split.setSizes([520, 640])
-        self.body.addWidget(split, 1)
+        findings_layout.addWidget(split, 1)
+        self.tabs.addTab(findings, "\U0001f50e  Findings")
+
+        # The system report used to be a tab of the About dialog, where
+        # nobody writing a bug report would think to look. It belongs here,
+        # beside what is wrong.
+        report_tab = QWidget()
+        report_layout = QVBoxLayout(report_tab)
+        report_layout.setContentsMargins(0, 8, 0, 0)
+        self.report_view = QPlainTextEdit()
+        self.report_view.setReadOnly(True)
+        self.report_view.setObjectName("systemReport")
+        self.report_view.setLineWrapMode(QPlainTextEdit.NoWrap)
+        # The report is columns of key and value; a proportional font turns
+        # them into a ragged mess.
+        # A widget stylesheet, because the application-wide one sets a
+        # proportional family for QPlainTextEdit and wins over setFont.
+        self.report_view.setStyleSheet(
+            'font-family: "Cascadia Mono", "Cascadia Code", "DejaVu Sans '
+            'Mono", "Fira Code", "JetBrains Mono", "Consolas", monospace;')
+        report_layout.addWidget(self.report_view, 1)
+        self.tabs.addTab(report_tab, "\U0001f9fe  System report")
+        self.tabs.currentChanged.connect(self._tab_changed)
+        self.body.addWidget(self.tabs, 1)
 
         rs = rule_stats()
         self.body.addWidget(QLabel(
@@ -70,6 +106,28 @@ class DiagnosticsPage(Page):
             f"QTableWidget::item {{ padding: 7px 10px; }}"
             f"QHeaderView::section {{ font-size: {c['fs_base'] + 1}px;"
             f" font-weight: bold; padding: 9px; }}")
+
+    def _tab_changed(self, index: int) -> None:
+        if index == 1 and not self.report_view.toPlainText():
+            self._build_report()
+
+    def _build_report(self) -> None:
+        from ...core import report
+        self.report_view.setPlainText("Gathering\u2026")
+        run_job(CallableJob(report.build), self.report_view.setPlainText,
+                lambda message: self.report_view.setPlainText(
+                    f"Could not gather the report: {message}"))
+
+    def _copy_report(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        from ...core import report
+        text = self.report_view.toPlainText()
+        if not text or text.startswith("Gathering"):
+            text = report.build()
+            self.report_view.setPlainText(text)
+        QApplication.clipboard().setText(text)
+        self.tabs.setCurrentIndex(1)
+        self.status.emit("System report copied \u2014 paste it into the issue")
 
     def on_shown(self) -> None:
         if not self.findings:
