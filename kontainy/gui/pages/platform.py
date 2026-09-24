@@ -236,7 +236,44 @@ class PlatformPage(Page):
             f"shows the command that switches to it before anything runs.")
         self.selector.currentIndexChanged.connect(self._selector_changed)
         bar.addWidget(self.selector)
+
         self.toolbar.addWidget(head)
+
+        # The address is the other half of the answer: a context name says
+        # nothing about which socket it reaches. It goes in as its own item
+        # of the flow layout, NOT inside the name-and-dropdown block, so a
+        # narrow window can move it to the next line. Putting it in that
+        # block made every platform page 20 to 60 px too wide on Windows.
+        socket_box = QWidget()
+        socket_bar = QHBoxLayout(socket_box)
+        socket_bar.setContentsMargins(0, 0, 0, 0)
+        socket_bar.setSpacing(8)
+        socket_label = QLabel("Socket:")
+        socket_label.setProperty("noWrap", True)
+        socket_bar.addWidget(socket_label)
+        self.address_selector = QComboBox()
+        # Wide enough for a real endpoint to be read in full:
+        # npipe:////./pipe/dockerDesktopLinuxEngine, qemu+ssh://user@host/system.
+        # It still shrinks in a narrow window, because the flow layout can
+        # move it to the next line instead of widening the page.
+        self.address_selector.setMinimumWidth(330)
+        self.address_selector.setSizeAdjustPolicy(
+            QComboBox.AdjustToContents)
+        self.address_selector.setToolTip(
+            "The endpoint behind the selected " +
+            provider.target_noun.lower() + ".")
+        self.address_selector.currentIndexChanged.connect(
+            self._address_changed)
+        socket_bar.addWidget(self.address_selector)
+        self.toolbar.addWidget(socket_box)
+
+        self.activate_btn = QPushButton("\u2714  Activate")
+        self.activate_btn.setCursor(Qt.PointingHandCursor)
+        self.activate_btn.setToolTip(
+            "Make the selected one active. The command is shown in the strip "
+            "below and in the log \u2014 nothing pops up.")
+        self.activate_btn.clicked.connect(self._activate_selected)
+        self.toolbar.addWidget(self.activate_btn)
 
         self.version_label = QLabel("")
         self.version_label.setObjectName("platformVersion")
@@ -316,7 +353,7 @@ class PlatformPage(Page):
 
         self.targets_table = self._table(
             ["", provider.target_noun, "Address", "Kind", "Detail"])
-        self.targets_table.doubleClicked.connect(self._activate_selected)
+        self.targets_table.doubleClicked.connect(self._activate_row)
         layout.addWidget(self.targets_table, 1)
 
         # How the CLI actually picks its target. For Docker this is the part
@@ -334,7 +371,7 @@ class PlatformPage(Page):
 
         row = QHBoxLayout()
         for text, handler, kind in (
-                ("\u2714  Make active", self._activate_selected, "primary"),
+                ("\u2714  Make active", self._activate_row, "primary"),
                 (f"\u2795  Add {provider.target_noun.lower()}\u2026",
                  self._add, "secondary"),
                 ("\U0001f50e  Test", self._test_selected, "secondary"),
@@ -548,8 +585,11 @@ class PlatformPage(Page):
         # --- selector ---
         self._filling = True
         self.selector.clear()
+        self.address_selector.clear()
         active_index = 0
         for index, target in enumerate(state["targets"]):
+            self.address_selector.addItem(target.address or "\u2014",
+                                          target.name)
             # Only the name: an address in the dropdown got cut off mid-path.
             # The full address is on the line underneath and in the tooltip.
             self.selector.addItem(target.name, target.name)
@@ -557,7 +597,9 @@ class PlatformPage(Page):
             if target.active:
                 active_index = index
         self.selector.setCurrentIndex(active_index)
+        self.address_selector.setCurrentIndex(active_index)
         self._filling = False
+        self._update_activate()
 
         self.version_label.setText(state["version"])
         active = state["active"]
@@ -629,9 +671,7 @@ class PlatformPage(Page):
                 item = QTableWidgetItem(text)
                 if wins:
                     item.setForeground(QColor(c["success"]))
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
+                    item.setFont(_bold(item.font()))
                 table.setItem(r, col, item)
         table.resizeColumnsToContents()
 
@@ -905,17 +945,57 @@ class PlatformPage(Page):
         return self.state["targets"][row]
 
     def _selector_changed(self, index: int) -> None:
+        """Choosing is not switching.
+
+        This used to run the switch the moment the dropdown changed, which
+        put a dialog on screen for a glance at the list. Now the two
+        dropdowns follow each other and the Activate button does the work.
+        """
         if self._filling or index < 0:
             return
-        target = self._target(self.selector.itemData(index))
+        self._filling = True
+        self.address_selector.setCurrentIndex(index)
+        self._filling = False
+        self._preview_selected()
+
+    def _address_changed(self, index: int) -> None:
+        if self._filling or index < 0:
+            return
+        self._filling = True
+        self.selector.setCurrentIndex(index)
+        self._filling = False
+        self._preview_selected()
+
+    def _selected_in_bar(self):
+        return self._target(self.selector.currentData())
+
+    def _update_activate(self) -> None:
+        target = self._selected_in_bar()
+        self.activate_btn.setEnabled(bool(target) and not target.active)
+        self.activate_btn.setText("\u2714  Active" if target and target.active
+                                  else "\u2714  Activate")
+
+    def _preview_selected(self) -> None:
+        """Show what Activate would run, without running it."""
+        self._update_activate()
+        target = self._selected_in_bar()
         if target is None or target.active:
             return
-        self._run(self.PROVIDER.activate(target))
+        action = self.PROVIDER.prepare(self.PROVIDER.activate(target))
+        self.show_command(action.display(), note=action.id, record=False)
+        self.status.emit(f"Selected {target.name} \u2014 press Activate to "
+                         f"make it the active {self.PROVIDER.target_noun.lower()}")
 
-    def _activate_selected(self, *_):
+    def _activate_selected(self) -> None:
+        target = self._selected_in_bar()
+        if target is None or target.active:
+            return
+        self._run_inline(self.PROVIDER.activate(target))
+
+    def _activate_row(self, *_):
         target = self._selected_target()
         if target and not target.active:
-            self._run(self.PROVIDER.activate(target))
+            self._run_inline(self.PROVIDER.activate(target))
 
     def _test_selected(self):
         target = self._selected_target() or (self.state or {}).get("active")
@@ -936,6 +1016,39 @@ class PlatformPage(Page):
         dialog = AddTargetDialog(self.PROVIDER, self)
         if dialog.exec() == QDialog.Accepted:
             self._run(self.PROVIDER.add(dialog.values()))
+
+    def _run_inline(self, action) -> None:
+        """Run a harmless switch without a dialog.
+
+        Switching a context or a connection is reversible and changes
+        nothing but a setting, so it does not deserve a modal window. The
+        command is still shown — in the strip, in the status bar and in the
+        log — which is what the rule is for. Anything destructive, or
+        anything needing root, still goes through the dialog.
+        """
+        from ..dialogs.run_command import RunCommandDialog
+        action = self.PROVIDER.prepare(action)
+        if action.destructive or action.scope == act.ROOT:
+            self.show_command(action.display(), note=action.id, record=False)
+            RunCommandDialog(action, self).exec()
+            self.refresh()
+            return
+        self.show_command(action.display(), note=action.id, record=True)
+        self.status.emit(f"{action.label}\u2026")
+        self.busy.emit(True)
+        run_job(CallableJob(action.execute), self._inline_done,
+                self._inline_failed)
+
+    def _inline_done(self, result) -> None:
+        self.busy.emit(False)
+        text = (result.stdout or result.stderr or "").strip().splitlines()
+        self.status.emit(text[-1] if text and not result.ok
+                         else ("Done" if result.ok else "Failed"))
+        self.refresh()
+
+    def _inline_failed(self, message: str) -> None:
+        self.busy.emit(False)
+        self.status.emit(f"Failed: {message}")
 
     def _run(self, action) -> None:
         from ..dialogs.run_command import RunCommandDialog
@@ -979,6 +1092,20 @@ class PlatformPage(Page):
                 table.setStyleSheet(
                     f"QTableWidget {{ font-size: {c['fs_base'] + 2}px; }}"
                     f"QTableWidget::item {{ padding: 7px 10px; }}")
+
+
+def _bold(font):
+    """A bold copy of a font, safe on Windows.
+
+    A stylesheet sets sizes in pixels, so pointSize() comes back as -1 and
+    Qt complains — "QFont::setPointSize: Point size <= 0 (-1)" — as soon as
+    the copy is used. The warning was always there; routing Qt's messages
+    into kontainy's log is what made it visible.
+    """
+    if font.pointSize() <= 0 and font.pixelSize() <= 0:
+        font.setPointSize(10)
+    font.setBold(True)
+    return font
 
 
 def make_platform_page(provider) -> type:

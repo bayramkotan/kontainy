@@ -1,4 +1,17 @@
-"""kontainy — Container'lar sayfası."""
+"""
+kontainy — Containers page
+
+Every container from every engine, in one table — and, for each one, WHERE
+it lives: which engine, which context or connection, and what kind of socket
+that is. Without those columns the page answered "here are your containers"
+while quietly leaving out the ones on another context, which is the oldest
+way to lose a container in this ecosystem.
+
+It reads through the providers, the same as the Docker and Podman pages. It
+used to open the engine sockets itself, which meant it saw nothing at all on
+Windows, where Docker listens on a named pipe: the Docker page showed three
+containers while this page showed none.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +20,14 @@ import json
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHeaderView, QLabel, QLineEdit, QMessageBox, QSplitter,
+    QAbstractItemView, QComboBox, QHeaderView, QLabel, QLineEdit, QSplitter,
     QTableWidget, QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout,
     QWidget,
 )
 
 from ...core import discovery
-from ...core.api import EngineError
+from ...core.providers import by_id
+from ...core.providers.base import socket_kind
 from ...utils.config import log
 from ...utils.workers import CallableJob, run_job
 from .base import Page
@@ -23,39 +37,40 @@ STATE_COLORS = {
     "paused": "#f9e2af", "dead": "#f38ba8", "stopped": "#9399b2",
 }
 
+ENGINES = ("docker", "podman")
 
-def _discover_and_collect() -> tuple:
-    """Find every engine, then list its containers — one background job.
 
-    This page used to wait for the Engines page to hand it a list of
-    endpoints. The Engines page is gone, so it discovers on its own.
+def _collect_all() -> list:
+    """Every container on every context and connection of both engines.
+
+    One row per container, tagged with the target it came from, so the table
+    can say where each one lives and the filter can narrow to one source.
     """
-    endpoints = discovery.discover(probe=True)
-    return endpoints, _collect(endpoints)
-
-
-def _collect(endpoints) -> list:
     rows = []
-    for ep in endpoints:
-        if not ep.reachable:
+    for engine_id in ENGINES:
+        provider = by_id(engine_id)
+        if provider is None or not provider.shown_here() \
+                or not provider.available():
             continue
-        client = discovery.client_for(ep)
-        try:
-            containers = client.containers(all_=True)
-        except EngineError as exc:
-            log().warning("%s listelenemedi: %s", ep.address, exc)
-            continue
-        for c in containers:
-            names = c.get("Names") or []
-            name = (names[0] if names else c.get("Id", "")[:12]).lstrip("/")
-            rows.append({
-                "engine": ep.title, "endpoint": ep.address,
-                "engine_kind": ep.family,
-                "name": name, "image": c.get("Image", ""),
-                "state": c.get("State", ""), "status": c.get("Status", ""),
-                "id": c.get("Id", "")[:12], "ports": c.get("Ports") or [],
-                "raw": c,
-            })
+        for target in provider.targets():
+            listing = provider.objects(target)
+            if listing.error:
+                log().warning("%s / %s: %s", provider.name, target.name,
+                              listing.error.splitlines()[0])
+                continue
+            for item in listing.rows:
+                rows.append({
+                    "engine": provider.name, "engine_id": engine_id,
+                    "target": target.name, "address": target.address,
+                    "kind": socket_kind(target.address),
+                    "active": target.active,
+                    "name": str(item.get("Names", "")),
+                    "image": str(item.get("Image", "")),
+                    "state": str(item.get("State", "")).lower(),
+                    "status": str(item.get("Status", "")),
+                    "ports": str(item.get("Ports", "")),
+                    "raw": item,
+                })
     return rows
 
 
@@ -63,9 +78,9 @@ class ContainersPage(Page):
     NAME = "containers"
     TITLE = "Containers"
     ICON = "📦"
-    SUBTITLE = ("Containers from EVERY engine found, in one table. The Engine "
-                "column tells you which one holds it \u2014 a container is "
-                "never \"lost\".")
+    SUBTITLE = ("Containers from every engine, every context and every "
+                "connection, in one table \u2014 with the source of each one "
+                "named, so a container is never \"lost\".")
 
     def build(self) -> None:
         self.endpoints = []
@@ -84,6 +99,20 @@ class ContainersPage(Page):
         self.add_tool_button("\U0001f5d1  Remove", lambda: self._act("remove"),
                              kind="danger")
 
+        self.source = QComboBox()
+        self.source.setMinimumWidth(240)
+        self.source.setToolTip(
+            "Which engine and which context or connection to show. "
+            "The active one of each engine is marked.")
+        self.source.currentIndexChanged.connect(self._apply_filter)
+        self.toolbar.addWidget(QLabel("Source:"))
+        self.toolbar.addWidget(self.source)
+        self.activate_btn = self.add_tool_button(
+            "\u2714  Make active", self._activate_source)
+        self.activate_btn.setToolTip(
+            "Make the selected context or connection the active one for "
+            "its engine \u2014 the command is shown first.")
+
         self.search = QLineEdit()
         self.search.setPlaceholderText("Filter: name, image, engine, state\u2026")
         self.search.textChanged.connect(self._apply_filter)
@@ -95,10 +124,11 @@ class ContainersPage(Page):
 
         split = QSplitter(Qt.Vertical)
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Engine", "Name", "Image", "State", "Status", "ID"])
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+            ["Engine", "Context / Connection", "Name", "Image", "State",
+             "Status", "Socket"])
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -138,13 +168,31 @@ class ContainersPage(Page):
     def refresh(self) -> None:
         self.refresh_btn.setEnabled(False)
         self.busy.emit(True)
-        self.status.emit("Looking for engines and their containers\u2026")
-        run_job(CallableJob(_discover_and_collect), self._discovered,
-                self._failed)
+        self.status.emit("Reading every context and connection\u2026")
+        run_job(CallableJob(_collect_all), self._fill, self._failed)
 
-    def _discovered(self, payload) -> None:
-        self.endpoints, rows = payload
-        self._fill(rows)
+    def _sources(self) -> list:
+        """(engine_id, target name) pairs seen in the rows, active first."""
+        seen = {}
+        for row in self.rows:
+            seen.setdefault((row["engine_id"], row["target"]),
+                            (row["engine"], row["active"], row["kind"]))
+        return [(key, value) for key, value in seen.items()]
+
+    def _fill_sources(self) -> None:
+        current = self.source.currentData()
+        self.source.blockSignals(True)
+        self.source.clear()
+        self.source.addItem("All sources", None)
+        for (engine_id, target), (engine, active, kind) in self._sources():
+            mark = "\u25cf " if active else "   "
+            label = f"{mark}{engine} \u00b7 {target}"
+            if kind:
+                label += f"  ({kind})"
+            self.source.addItem(label, (engine_id, target))
+        index = self.source.findData(current)
+        self.source.setCurrentIndex(index if index >= 0 else 0)
+        self.source.blockSignals(False)
 
     def _failed(self, message: str) -> None:
         self.refresh_btn.setEnabled(True)
@@ -155,33 +203,46 @@ class ContainersPage(Page):
         self.rows = rows
         self.refresh_btn.setEnabled(True)
         self.busy.emit(False)
+        self._fill_sources()
         self._apply_filter()
+        log().info("Containers: %d from %d source(s)", len(rows),
+                   len(self._sources()))
 
     def _apply_filter(self) -> None:
         text = self.search.text().strip().casefold()
+        chosen = self.source.currentData()
+        rows = self.rows
+        if chosen:
+            rows = [r for r in rows
+                    if (r["engine_id"], r["target"]) == tuple(chosen)]
         if text:
-            self.filtered = [r for r in self.rows if text in " ".join(
-                [r["name"], r["image"], r["engine"], r["state"]]).casefold()]
-        else:
-            self.filtered = list(self.rows)
+            rows = [r for r in rows if text in " ".join(
+                [r["name"], r["image"], r["engine"], r["state"],
+                 r["target"], r["address"]]).casefold()]
+        self.filtered = list(rows)
+        self._update_activate_button()
 
         self.table.setRowCount(0)
         for row in self.filtered:
             r = self.table.rowCount()
             self.table.insertRow(r)
-            cells = [row["engine"], row["name"], row["image"],
-                     row["state"], row["status"], row["id"]]
+            target = row["target"] + (" \u25cf" if row["active"] else "")
+            cells = [row["engine"], target, row["name"], row["image"],
+                     row["state"], row["status"], row["kind"]]
             for col, text_ in enumerate(cells):
                 item = QTableWidgetItem(str(text_))
-                if col == 3:
+                if col == 4:
                     item.setForeground(QColor(STATE_COLORS.get(text_, "#9399b2")))
                 self.table.setItem(r, col, item)
         self.table.resizeColumnsToContents()
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
 
         running = sum(1 for x in self.filtered if x["state"] == "running")
+        sources = len(self._sources())
         self.count_label.setText(
-            f"{len(self.filtered)}/{len(self.rows)} containers \u00b7 {running} running")
+            f"{len(self.filtered)}/{len(self.rows)} containers \u00b7 "
+            f"{running} running \u00b7 {sources} "
+            f"source{'s' if sources != 1 else ''}")
         if self.filtered:
             self.table.selectRow(0)
 
@@ -198,36 +259,42 @@ class ContainersPage(Page):
                 tab.clear()
             return
 
+        provider = by_id(item["engine_id"])
+        noun = provider.target_noun if provider else "Target"
         self.tab_summary.setHtml(
             f"<h2>{item['name']}</h2>"
             f"<table cellpadding='4'>"
             f"<tr><td><b>Engine</b></td><td>{item['engine']}</td></tr>"
-            f"<tr><td><b>Endpoint</b></td><td><code>{item['endpoint']}</code></td></tr>"
+            f"<tr><td><b>{noun}</b></td><td>{item['target']}"
+            f"{' — active' if item['active'] else ''}</td></tr>"
+            f"<tr><td><b>Socket</b></td><td><code>{item['address']}</code>"
+            f"{'<br>' + item['kind'] if item['kind'] else ''}</td></tr>"
             f"<tr><td><b>Image</b></td><td>{item['image']}</td></tr>"
-            f"<tr><td><b>State</b></td><td>{item['state']} \u2014 {item['status']}</td></tr>"
-            f"<tr><td><b>ID</b></td><td><code>{item['id']}</code></td></tr>"
+            f"<tr><td><b>State</b></td><td>{item['state']} \u2014 "
+            f"{item['status']}</td></tr>"
             f"</table>")
 
         ports = item["ports"]
         if ports:
-            lines = ["<table cellpadding='4'><tr><th>Host</th><th>Container</th>"
-                     "<th>Protocol</th></tr>"]
-            for p in ports:
-                host = f"{p.get('IP', '')}:{p.get('PublicPort', '')}".strip(":")
-                lines.append(f"<tr><td>{host or '—'}</td>"
-                             f"<td>{p.get('PrivatePort', '')}</td>"
-                             f"<td>{p.get('Type', '')}</td></tr>")
-            lines.append("</table>")
-            self.tab_ports.setHtml("".join(lines))
+            rows_html = "".join(f"<tr><td><code>{part.strip()}</code></td></tr>"
+                                for part in ports.split(",") if part.strip())
+            self.tab_ports.setHtml(
+                f"<table cellpadding='4'>{rows_html}</table>"
+                f"<p>Ports are fixed when a container is created. To change "
+                f"them, open the {item['engine']} page and use "
+                f"<b>Ports\u2026</b>, which recreates the container without "
+                f"losing its volumes.</p>")
         else:
             self.tab_ports.setHtml("<p>No published ports.</p>")
 
         self.tab_raw.setHtml(
             f"<pre>{json.dumps(item['raw'], indent=2, ensure_ascii=False)}</pre>")
 
-        cli = "podman" if item["engine_kind"] == "podman" else "docker"
-        self.show_command(f"{cli} inspect {item['id']}",
-                          engine=item["engine_kind"], record=False)
+        flag = "--context" if item["engine_id"] == "docker" else "--connection"
+        scope = "" if item["target"] in ("(local)", "") else \
+            f" {flag} {item['target']}"
+        self.show_command(f"{item['engine_id']}{scope} inspect {item['name']}",
+                          engine=item["engine_id"], record=False)
 
     # --- creation ----------------------------------------------------------
     def _new_container(self, preset: str = "") -> None:
@@ -259,38 +326,76 @@ class ContainersPage(Page):
             return
         self._new_container(tpl.TEMPLATES[labels.index(choice)].id)
 
+    def _target_of(self, item):
+        provider = by_id(item["engine_id"])
+        if provider is None:
+            return None, None
+        target = next((x for x in provider.targets()
+                       if x.name == item["target"]), None)
+        return provider, target
+
     def _act(self, action: str) -> None:
+        """Run the engine's own verb on the container, on ITS context.
+
+        The page used to call the engine socket directly, which sent every
+        action to whichever engine it had opened rather than the one the
+        container actually lives on.
+        """
         item = self._current()
         if item is None:
             return
-        cli = "podman" if item["engine_kind"] == "podman" else "docker"
-        verb = {"start": "start", "stop": "stop",
-                "restart": "restart", "remove": "rm -f"}[action]
-        command = f"{cli} {verb} {item['id']}"
-
-        if action == "remove":
-            answer = QMessageBox.question(
-                self, "Remove container?",
-                f"<b>{item['name']}</b> will be removed permanently.\n\n"
-                f"Equivalent: <code>{command}</code>")
-            if answer != QMessageBox.Yes:
-                return
-
-        ep = next((e for e in self.endpoints if e.address == item["endpoint"]), None)
-        if ep is None:
+        provider, target = self._target_of(item)
+        if provider is None:
             return
-        client = discovery.client_for(ep)
-        try:
-            if action == "remove":
-                client.remove(item["id"], force=True)
-            else:
-                getattr(client, action)(item["id"])
-        except EngineError as exc:
-            self.show_command(command, engine=item["engine_kind"],
-                              note=str(exc), record=True)
-            QMessageBox.warning(self, "Operation failed", str(exc))
+        wanted = {"start": "start", "stop": "stop", "restart": "restart",
+                  "remove": "remove"}[action]
+        actions = {self._verb(a.label): a
+                   for a in provider.object_actions(target, item["raw"])}
+        chosen = actions.get(wanted)
+        if chosen is None:
+            self.status.emit(
+                f"{item['name']}: {action} does not apply now "
+                f"(state: {item['state'] or 'unknown'})")
             return
+        self._run(provider.prepare(chosen))
 
-        self.show_command(command, engine=item["engine_kind"], record=True)
-        self.status.emit(f"{item['name']}: {action} done")
+    @staticmethod
+    def _verb(label: str) -> str:
+        import re
+        return "-".join(re.sub(r"[^A-Za-z0-9]+", " ", label).strip()
+                        .lower().split())
+
+    def _run(self, action) -> None:
+        from ..dialogs.run_command import RunCommandDialog
+        self.show_command(action.display(), note=action.id, record=False)
+        RunCommandDialog(action, self).exec()
         self.refresh()
+
+    def _update_activate_button(self) -> None:
+        chosen = self.source.currentData()
+        if not chosen:
+            self.activate_btn.setEnabled(False)
+            return
+        engine_id, target_name = tuple(chosen)
+        active = any(r["active"] for r in self.rows
+                     if r["engine_id"] == engine_id
+                     and r["target"] == target_name)
+        self.activate_btn.setEnabled(not active)
+
+    def _activate_source(self) -> None:
+        """Make the chosen context or connection the active one.
+
+        This is the same switch as on the engine's own page — from here,
+        because this is where someone notices they are looking at the wrong
+        one.
+        """
+        chosen = self.source.currentData()
+        if not chosen:
+            return
+        engine_id, target_name = tuple(chosen)
+        provider = by_id(engine_id)
+        target = next((x for x in provider.targets()
+                       if x.name == target_name), None) if provider else None
+        if provider is None or target is None:
+            return
+        self._run(provider.prepare(provider.activate(target)))
