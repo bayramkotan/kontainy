@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from ...core import templates as tpl
 from ...core.api import EngineError
 from ...utils.config import history, log
+from ...utils.workers import CallableJob, run_job
 from ..syntax_highlighter import ShellHighlighter
 
 CAPABILITIES = [
@@ -48,6 +49,9 @@ class CreateContainerDialog(QDialog):
     def __init__(self, endpoints: list, parent=None, preset: str = ""):
         super().__init__(parent)
         self.endpoints = [e for e in endpoints if e.reachable]
+        self.existing_names = []
+        self.taken_ports = []
+        self.facts = None
         self.setWindowTitle("Create Container")
         self.resize(1080, 820)
         self._build()
@@ -56,6 +60,10 @@ class CreateContainerDialog(QDialog):
             if index >= 0:
                 self.template_box.setCurrentIndex(index)
         self._update_preview()
+        # Read the target once the dialog exists: which images are here,
+        # which names and host ports are taken.
+        self.image.currentTextChanged.connect(self._image_chosen)
+        self._load_context()
 
     # --- construction ------------------------------------------------------
     def _build(self):
@@ -68,6 +76,7 @@ class CreateContainerDialog(QDialog):
         for endpoint in self.endpoints:
             self.engine_box.addItem(endpoint.title, endpoint)
         self.engine_box.currentIndexChanged.connect(self._update_preview)
+        self.engine_box.currentIndexChanged.connect(self._load_context)
         top.addWidget(self.engine_box, 2)
 
         top.addWidget(QLabel("Template:"))
@@ -95,6 +104,13 @@ class CreateContainerDialog(QDialog):
         self.tabs.addTab(self._tab_health(), "Health")
         self.tabs.addTab(self._tab_advanced(), "Advanced")
         layout.addWidget(self.tabs, 1)
+
+        # What kontainy can see is wrong, before anything runs.
+        self.notes = QLabel("")
+        self.notes.setWordWrap(True)
+        self.notes.setTextFormat(Qt.RichText)
+        self.notes.setVisible(False)
+        layout.addWidget(self.notes)
 
         preview_box = QGroupBox("Command preview — this is exactly what runs")
         pl = QVBoxLayout(preview_box)
@@ -125,6 +141,7 @@ class CreateContainerDialog(QDialog):
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.ok_button = buttons.button(QDialogButtonBox.Ok)
         buttons.button(QDialogButtonBox.Ok).setText("Create and start")
         buttons.accepted.connect(self._create)
         buttons.rejected.connect(self.reject)
@@ -138,6 +155,11 @@ class CreateContainerDialog(QDialog):
                 widget.textChanged.connect(self._update_preview)
             elif isinstance(widget, QComboBox):
                 widget.currentIndexChanged.connect(self._update_preview)
+                if widget.isEditable():
+                    # An editable combo changes by typing as well as by
+                    # choosing; without this the preview lagged a keystroke
+                    # behind the image being typed.
+                    widget.currentTextChanged.connect(self._update_preview)
             elif isinstance(widget, QCheckBox):
                 widget.toggled.connect(self._update_preview)
             elif isinstance(widget, QSpinBox):
@@ -146,8 +168,16 @@ class CreateContainerDialog(QDialog):
     def _tab_basics(self) -> QWidget:
         page = QWidget()
         form = QFormLayout(page)
-        self.image = QLineEdit()
-        self.image.setPlaceholderText("docker.io/library/nginx:alpine")
+        # An editable dropdown, not a blank box: most of the time the image
+        # is already on this machine, and kontainy knows which.
+        self.image = QComboBox()
+        self.image.setEditable(True)
+        self.image.setInsertPolicy(QComboBox.NoInsert)
+        self.image.lineEdit().setPlaceholderText(
+            "Pick one that is here, or type any reference")
+        self.image.lineEdit().setPlaceholderText(
+            "Pick an image that is already here, or type any "
+            "reference \u2014 docker.io/library/nginx:alpine")
         self.name = QLineEdit()
         self.command = QLineEdit()
         self.command.setPlaceholderText("override the image CMD (optional)")
@@ -410,7 +440,7 @@ class CreateContainerDialog(QDialog):
         if template is None:
             return
 
-        self.image.setText(template.image)
+        self.image.setCurrentText(template.image)
         self.name.setText(template.id)
         self.restart.setCurrentText(template.restart)
         self.ports.setPlainText("\n".join(template.ports))
@@ -439,6 +469,129 @@ class CreateContainerDialog(QDialog):
         self._update_preview()
 
     # --- command construction ---------------------------------------------
+    # --- what the image and the target already know -------------------------
+    def _load_context(self) -> None:
+        """Fill the image list and learn what names and ports are taken.
+
+        Off the GUI thread: listing images and containers on a slow or
+        remote target is not instant, and a dialog that freezes while it
+        opens is worse than one that asks.
+        """
+        endpoint = self.engine_box.currentData()
+        provider = getattr(endpoint, "provider", None)
+        if provider is None:
+            return
+        target = endpoint.target
+
+        def gather():
+            from ...core import imageinfo
+            listing = provider.objects(target)
+            rows = [] if listing.error else listing.rows
+            taken_ports = []
+            for row in rows:
+                for part in str(row.get("Ports", "")).split(","):
+                    bit = part.strip().split("->")[0]
+                    if ":" in bit:
+                        taken_ports.append(bit.rsplit(":", 1)[-1])
+            return {"images": imageinfo.local_images(provider, target),
+                    "names": [str(r.get("Names", "")) for r in rows],
+                    "ports": taken_ports}
+
+        run_job(CallableJob(gather), self._context_ready, lambda _m: None)
+
+    def _context_ready(self, data) -> None:
+        self.existing_names = data["names"]
+        self.taken_ports = data["ports"]
+        current = self.image.currentText()
+        self.image.blockSignals(True)
+        self.image.clear()
+        for item in data["images"]:
+            label = item["reference"]
+            if item.get("size"):
+                label += f"   ({item['size']}, {item.get('created', '')})"
+            self.image.addItem(label, item["reference"])
+        self.image.setCurrentText(current)
+        self.image.blockSignals(False)
+        self._update_preview()
+
+    def _image_reference(self) -> str:
+        data = self.image.currentData()
+        text = self.image.currentText().strip()
+        if data and text.startswith(str(data)):
+            return str(data)
+        return text.split("   (")[0].strip()
+
+    def _image_chosen(self, *_):
+        """Read the image and offer what it already says about itself."""
+        reference = self._image_reference()
+        if not reference:
+            return
+        endpoint = self.engine_box.currentData()
+        provider = getattr(endpoint, "provider", None)
+        if provider is None:
+            return
+        target = endpoint.target
+        from ...core import imageinfo
+        run_job(CallableJob(imageinfo.read_facts, provider, target,
+                            reference),
+                self._facts_ready, lambda _m: None)
+
+    def _facts_ready(self, facts) -> None:
+        from ...core import imageinfo
+        self.facts = facts
+        if not self.name.text().strip():
+            self.name.setText(imageinfo.suggest_name(facts.reference,
+                                                     self.existing_names))
+        # The image's own values become the placeholders: an empty box now
+        # means "what the image does", which is what the engine will use.
+        self.command.setPlaceholderText(
+            " ".join(facts.command) or "override the image CMD (optional)")
+        self.entrypoint.setPlaceholderText(
+            " ".join(facts.entrypoint) or "override the image ENTRYPOINT")
+        self.workdir.setPlaceholderText(facts.working_dir or "the image's own")
+        self.user.setPlaceholderText(facts.user or "the image's own (often root)")
+        if facts.ports and not self.ports.toPlainText().strip():
+            lines = [f"{host}:{container.split('/')[0]}"
+                     + ("" if container.endswith("tcp") else "/udp")
+                     for container, host, _note in
+                     imageinfo.suggest_ports(facts, self.taken_ports)]
+            self.ports.setPlainText("\n".join(lines))
+        if facts.env and not self.env.toPlainText().strip():
+            self.env.setPlaceholderText(
+                "The image already sets: "
+                + ", ".join(imageinfo.env_defaults(facts)[:6]))
+        self._update_preview()
+
+    def _show_notes(self) -> None:
+        from ...core import imageinfo
+        host_ports = []
+        for line in self.ports.toPlainText().splitlines():
+            bits = line.strip().split("/")[0].split(":")
+            if len(bits) >= 2:
+                host_ports.append(bits[-2])
+        found = imageinfo.problems(
+            self.name.text().strip(), self._image_reference(),
+            self.existing_names, host_ports, self.taken_ports)
+        facts = getattr(self, "facts", None)
+        if facts is not None and facts.reference == self._image_reference() \
+                and facts.needs_pull and self._image_reference():
+            found.append(("warning",
+                          f"{facts.reference} is not on this target yet, so "
+                          f"the run command pulls it first. That can take a "
+                          f"while and needs network."))
+        if not found:
+            self.notes.setVisible(False)
+            return
+        colours = {"error": "#f38ba8", "warning": "#f9e2af"}
+        marks = {"error": "\u26d4", "warning": "\u26a0"}
+        rows = [f"<div style='color:{colours[severity]}'>"
+                f"{marks[severity]} {text}</div>"
+                for severity, text in found]
+        self.notes.setText("".join(rows))
+        self.notes.setVisible(True)
+        self.ok_button.setEnabled(
+            not any(severity == "error" for severity, _ in found))
+
     def _engine_binary(self) -> str:
         """The binary AND the target it goes to.
 
@@ -568,7 +721,7 @@ class CreateContainerDialog(QDialog):
 
     def command_text(self) -> str:
         binary = self._engine_binary()
-        image = self.image.text().strip() or "<image>"
+        image = self._image_reference() or "<image>"
         parts = [f"{binary} run"] + [f"  {f}" for f in self._flags()]
         parts.append(f"  {image}")
         if self.command.text().strip():
@@ -577,6 +730,7 @@ class CreateContainerDialog(QDialog):
 
     def _update_preview(self):
         self.preview.setPlainText(self.command_text())
+        self._show_notes()
 
     def _copy(self):
         QGuiApplication.clipboard().setText(self.command_text())
@@ -600,7 +754,7 @@ class CreateContainerDialog(QDialog):
 
     def _generic_quadlet(self, name: str) -> str:
         lines = ["[Unit]", f"Description={name}", "", "[Container]",
-                 f"Image={self.image.text().strip()}",
+                 f"Image={self._image_reference()}",
                  f"ContainerName={name}"]
         for entry in _lines(self.ports):
             lines.append(f"PublishPort={entry}")
@@ -626,7 +780,7 @@ class CreateContainerDialog(QDialog):
         else:
             text = "\n".join(
                 ["services:", f"  {name}:",
-                 f"    image: {self.image.text().strip()}"]
+                 f"    image: {self._image_reference()}"]
                 + (["    ports:"] + [f'      - "{p}"' for p in _lines(self.ports)]
                    if _lines(self.ports) else [])
                 + (["    volumes:"] + [f"      - {v}" for v in _lines(self.volumes)]
@@ -660,7 +814,7 @@ class CreateContainerDialog(QDialog):
 
     # --- create ------------------------------------------------------------
     def _create(self):
-        if not self.image.text().strip():
+        if not self._image_reference():
             QMessageBox.warning(self, "Image required",
                                 "Pick an image or a template first.")
             return
@@ -777,7 +931,7 @@ class CreateContainerDialog(QDialog):
             host_config["CpusetCpus"] = self.cpuset.text().strip()
 
         payload = {
-            "Image": self.image.text().strip(),
+            "Image": self._image_reference(),
             "Env": _lines(self.env),
             "Labels": dict(
                 entry.split("=", 1) for entry in _lines(self.labels)

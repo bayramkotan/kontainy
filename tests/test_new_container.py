@@ -63,7 +63,7 @@ def test_the_command_names_the_chosen_context(engines, qt_app):
     from kontainy.gui.dialogs.create_container import CreateContainerDialog
     choices = page.engine_choices()
     dialog = CreateContainerDialog(choices, None)
-    dialog.image.setText("nginx:1.27")
+    dialog.image.setCurrentText("nginx:1.27")   # now a dropdown
     dialog.engine_box.setCurrentIndex(1)          # desktop-linux
     dialog._update_preview()
     first = dialog.command_text().splitlines()[0]
