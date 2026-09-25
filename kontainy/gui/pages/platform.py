@@ -343,7 +343,9 @@ class PlatformPage(Page):
         table.horizontalHeader().setStretchLastSection(True)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        # Several rows at once: stopping or removing four containers is one
+        # request, not four clicks. Ctrl and Shift work as everywhere else.
+        table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
         return table
@@ -399,6 +401,7 @@ class PlatformPage(Page):
         layout.addWidget(self.objects_note)
         self.objects_table = self._table(["\u2014"])
         self.objects_table.currentCellChanged.connect(self._object_selected)
+        self.objects_table.itemSelectionChanged.connect(self._object_selected)
         layout.addWidget(self.objects_table, 1)
         self.object_buttons = FlowLayout()
         layout.addLayout(self.object_buttons)
@@ -694,6 +697,24 @@ class PlatformPage(Page):
                 table.setItem(r, col, item)
         table.resizeColumnsToContents()
 
+    def _offer_to_start(self, listing) -> None:
+        """Installed but not answering: offer the thing that starts it.
+
+        Bayram, 2026-09-25: "Madem yüklü, o zaman çalıştırabilelim oradan."
+        A page that reports `unreachable` and offers nothing to do about it
+        is a dead end; the user already knows the daemon is off.
+        """
+        if not listing.error or not (self.state or {}).get("available"):
+            return
+        action = self.PROVIDER.start_engine()
+        if action is None:
+            return
+        self._button(self.PROVIDER.prepare(action), self.object_buttons)
+        hint = QLabel("\u2014 it is installed; this starts it")
+        hint.setProperty("noWrap", True)
+        self.object_buttons.addWidget(hint)
+        self.object_buttons.addStretch()
+
     def _fill_objects(self, listing) -> None:
         c = self.colors()
         table = self.objects_table
@@ -707,6 +728,8 @@ class PlatformPage(Page):
             self.objects_note.setText(
                 f"<span style='color:{c['danger']}'>{listing.error}</span>"
                 f"<br><code>{listing.command}</code>")
+            _clear(self.object_buttons)
+            self._offer_to_start(listing)
             return
         self.objects_note.setText(f"<code>{listing.command}</code>")
         self._fill_bulk(listing.rows)
@@ -739,8 +762,50 @@ class PlatformPage(Page):
             return None
         return listing.rows[row]
 
+    def _selected_object_rows(self) -> list:
+        listing = (self.state or {}).get("objects")
+        if not listing or listing.error:
+            return []
+        indexes = sorted({index.row() for index
+                          in self.objects_table.selectionModel().selectedRows()})
+        return [listing.rows[i] for i in indexes if i < len(listing.rows)]
+
+    def _selection_buttons(self, rows: list) -> None:
+        """One button per verb that applies to EVERY selected row.
+
+        A verb that does not apply to all of them is left out rather than
+        run on the ones it fits: asked to start four machines, kontainy
+        either starts four or says why it cannot.
+        """
+        from ...core.providers.base import actions_for_selection, verb_of
+        active = (self.state or {}).get("active")
+        label = QLabel(f"<b>{len(rows)} selected</b>")
+        label.setTextFormat(Qt.RichText)
+        label.setProperty("noWrap", True)
+        self.object_buttons.addWidget(label)
+        verbs = []
+        for candidate in self.PROVIDER.object_actions(active, rows[0]):
+            verb = verb_of(candidate.label)
+            if verb not in verbs:
+                verbs.append(verb)
+        added = 0
+        for verb in verbs:
+            action = actions_for_selection(self.PROVIDER, active, rows, verb)
+            if action is not None:
+                self._button(action, self.object_buttons)
+                added += 1
+        if not added:
+            self.object_buttons.addWidget(QLabel(
+                "The selected rows are in different states, so no single "
+                "action applies to all of them."))
+        self.object_buttons.addStretch()
+
     def _object_selected(self, *_):
         _clear(self.object_buttons)
+        rows = self._selected_object_rows()
+        if len(rows) > 1:
+            self._selection_buttons(rows)
+            return
         row = self._object_row()
         if row is None:
             return
@@ -1089,9 +1154,47 @@ class PlatformPage(Page):
         self.busy.emit(False)
         self.status.emit(f"Failed: {message}")
 
+    def _rename(self, name: str) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(
+            self, f"Rename {name}",
+            f"New name for {name}:\n\nThe container keeps its id, volumes, "
+            f"network and state; only the name changes.", text=name)
+        new_name = (new_name or "").strip()
+        if not ok or not new_name or new_name == name:
+            return
+        target = self.state["active"] if self.state else None
+        self._run(self.PROVIDER.rename_container(target, name, new_name))
+
+    def _recreate(self, name: str) -> None:
+        target = self.state["active"] if self.state else None
+        self.status.emit(f"Reading {name}'s configuration\u2026")
+        self._run(self.PROVIDER.recreate_container(target, name))
+
+    def _open_logs(self, action) -> None:
+        """A follow goes to the log viewer, not to the run-once dialog,
+        which would wait for a command that never ends."""
+        from ..dialogs.logs_viewer import LogsDialog
+        self.show_command(" ".join(action.follow), note=action.id,
+                          record=False)
+        LogsDialog(action, self).exec()
+
     def _run(self, action) -> None:
         from ..dialogs.run_command import RunCommandDialog
         action = self.PROVIDER.prepare(action)
+        if action.follow:
+            self._open_logs(action)
+            return
+        # Two actions are placeholders: they name what will happen, but the
+        # command can only be built once the page knows which container and,
+        # for a rename, what the new name is.
+        if action.id.startswith("rename-"):
+            self._rename(action.id[len("rename-"):])
+            return
+        if action.id.startswith("recreate-") and not action.command \
+                and action.func is None:
+            self._recreate(action.id[len("recreate-"):])
+            return
         self.show_command(action.display(), note=action.id, record=False)
         dialog = RunCommandDialog(action, self)
         dialog.exec()

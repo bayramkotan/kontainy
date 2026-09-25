@@ -299,6 +299,8 @@ class Provider:
         if host is not None and host.is_wsl and action.command:
             action.command = host.wrap(action.command,
                                        root=action.scope == ROOT)
+            if action.follow:
+                action.follow = host.wrap(action.follow)
             if action.scope == ROOT:
                 action.scope = USER       # wsl -u root needs no elevation
         return action
@@ -315,6 +317,32 @@ class Provider:
             return ""
         ok, text = self._cli([self.binary, "--version"], timeout=8.0)
         return text.splitlines()[0] if ok and text else ""
+
+    def start_engine(self):
+        """How to start this technology when it is installed but not running.
+
+        Bayram, 2026-09-25: "Madem yüklü, o zaman çalıştırabilelim oradan."
+        A page that says `unreachable` and offers nothing to do about it is
+        a dead end — the user knows the daemon is off; what they want is the
+        command that turns it on.
+
+        Returns an Action, or None where there is nothing to start (a
+        client-only tool such as kubectl).
+        """
+        from ..registry import OS_KIND
+        if OS_KIND != "linux" or not self.services:
+            return None
+        unit, user, _why = self.services[0]
+        argv = (["systemctl", "--user", "start", unit] if user
+                else ["systemctl", "start", unit])
+        return Action(
+            id=f"start-engine-{self.id}", label=f"\u25b6  Start {self.name}",
+            command=argv, scope=USER if user else ROOT,
+            explanation=(
+                f"{self.name} is installed but not answering, which usually "
+                f"means its service is not running. This starts {unit} for "
+                f"this session; use the Services tab to have it start at "
+                f"boot as well."))
 
     def unavailable_reason(self) -> str:
         host = self.host()
@@ -391,13 +419,84 @@ class Provider:
         return {}
 
 
+def sequence(id: str, label: str, commands: list, explanation: str,
+             destructive: bool = False) -> Action:
+    """Several commands, one after another, shown in full before any run.
+
+    Tools like virsh and vmrun take one object per call, and a selection of
+    several rows means several calls whatever the tool. One place for it, so
+    the rollback, the failure report and the dialog behave the same
+    everywhere.
+    """
+    from ..elevate import run as _run
+
+    def execute():
+        failures = []
+        for argv in commands:
+            result = _run(argv, note=id)
+            if not result.ok:
+                failures.append(f"{' '.join(argv)}: {result.output}")
+        if failures:
+            raise RuntimeError("\n".join(failures))
+        return f"{len(commands)} commands succeeded"
+
+    return Action(id=id, label=label, command=[], scope=USER,
+                  shell_text="\n".join(" ".join(c) for c in commands),
+                  explanation=explanation, destructive=destructive,
+                  func=execute)
+
+
+def verb_of(label: str) -> str:
+    """'■  Shut down' -> 'shut-down' — the same name the CLI uses."""
+    import re
+    words = re.sub(r"[^A-Za-z0-9]+", " ", label).strip().lower()
+    return "-".join(words.split())
+
+
+def actions_for_selection(provider, target, rows: list, verb: str) -> Action:
+    """One action that applies `verb` to every selected row.
+
+    Returns None when the verb does not apply to all of them — asking to
+    remove four containers should not quietly remove three.
+    """
+    commands, labels = [], []
+    for row in rows:
+        by_verb = {verb_of(a.label): a for a in
+                   provider.object_actions(target, row)}
+        chosen = by_verb.get(verb)
+        # No command of its own (rename needs a new name, recreate reads the
+        # container first) or a stream to watch (logs): neither makes sense
+        # run one after another over a selection.
+        if chosen is None or not chosen.command or chosen.follow:
+            return None
+        commands.append(chosen.command)
+        labels.append(str(row.get(provider.object_key, "")))
+    if not commands:
+        return None
+    first = provider.object_actions(target, rows[0])
+    sample = {verb_of(a.label): a for a in first}[verb]
+    name = verb_of(sample.label).replace("-", " ")
+    return sequence(
+        f"selected-{verb}", f"{sample.label.split('  ')[0]}  "
+        f"{name.capitalize()} selected ({len(commands)})",
+        commands,
+        f"Runs the same thing on each of the {len(commands)} selected "
+        f"{provider.object_noun_plural.lower()} \u2014 one command per one, "
+        f"because that is how the tool works:\n\n  " + ", ".join(labels) +
+        f"\n\n{sample.explanation}",
+        destructive=sample.destructive)
+
+
 def action(id: str, label: str, argv: list, explanation: str, *,
-           scope: str = USER, destructive: bool = False) -> Action:
+           scope: str = USER, destructive: bool = False,
+           follow: list = None) -> Action:
     return Action(id=id, label=label, command=argv, scope=scope,
-                  explanation=explanation, destructive=destructive)
+                  explanation=explanation, destructive=destructive,
+                  follow=follow)
 
 
 __all__ = ["Provider", "Target", "Listing", "Column", "Field", "cli_text",
            "socket_kind", "count_label", "Section",
            "json_lines", "json_value", "action", "Action", "USER", "ROOT",
+           "sequence", "verb_of", "actions_for_selection",
            "SHELL", "NONE"]

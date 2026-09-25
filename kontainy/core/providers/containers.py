@@ -31,6 +31,27 @@ class DockerProvider(Provider):
         ("containerd.service", False, "The runtime Docker sits on."),
     ]
 
+    def start_engine(self):
+        from ..registry import OS_KIND
+        if OS_KIND == "windows":
+            return Action(
+                id="start-engine-docker", label="\u25b6  Start Docker Desktop",
+                command=["cmd", "/c", "start", "", "Docker Desktop.exe"],
+                scope=USER,
+                explanation=(
+                    "On Windows the daemon lives inside Docker Desktop, so "
+                    "there is no service to start: the application has to be "
+                    "running. It takes a few seconds to come up; press "
+                    "Refresh afterwards."))
+        if OS_KIND == "macos":
+            return Action(
+                id="start-engine-docker", label="\u25b6  Start Docker Desktop",
+                command=["open", "-a", "Docker"], scope=USER,
+                explanation=("On macOS the daemon lives inside Docker "
+                             "Desktop; this opens it. Press Refresh once it "
+                             "has finished starting."))
+        return super().start_engine()
+
     def resolution(self):
         from ..discovery import resolve_cli_target
         return resolve_cli_target().as_rows()
@@ -126,6 +147,18 @@ class DockerProvider(Provider):
 class PodmanProvider(Provider):
     id = "podman"
     address_noun = "Connection URI"
+
+    def start_engine(self):
+        from ..registry import OS_KIND
+        if OS_KIND in ("windows", "macos"):
+            return Action(
+                id="start-engine-podman", label="\u25b6  Start podman machine",
+                command=[self.binary, "machine", "start"], scope=USER,
+                explanation=(
+                    "Off Linux, Podman runs its containers inside a virtual "
+                    "machine. This starts the default one; if there is none "
+                    "yet, create it first with  podman machine init."))
+        return super().start_engine()
     name = "Podman"
     icon = "\U0001f9ad"
     binary = "podman"
@@ -288,7 +321,24 @@ def container_actions(provider, target, row: dict) -> list:
                           f"Starts the stopped container {name}."))
     out.append(Action(f"logs-{name}", "\U0001f4dc  Logs",
                       base + ["logs", "--tail", "200", name], USER,
-                      "The last 200 lines of the container's output."))
+                      "The last 200 lines of the container's output, and "
+                      "then whatever it writes next while the window is "
+                      "open. Nothing is sent to the container; this only "
+                      "reads what it has already printed.",
+                      follow=base + ["logs", "--tail", "200", "--follow",
+                                     "--timestamps", name]))
+    out.append(Action(f"recreate-{name}", "\u21bb  Recreate",
+                      [], USER,
+                      f"Rebuilds {name} from its own configuration \u2014 the "
+                      f"same image tag, ports, volumes and environment \u2014 "
+                      f"to pick up a newer image or a changed daemon setting.",
+                      shell_text=f"{provider.binary} stop/rename/run "
+                                 f"(read from the container itself)"))
+    out.append(Action(f"rename-{name}", "\u270f  Rename\u2026",
+                      [], USER,
+                      f"Gives {name} a new name. Nothing is recreated and "
+                      f"nothing is lost.",
+                      shell_text=f"{provider.binary} rename {name} NEW-NAME"))
     out.append(Action(f"rm-{name}", "\U0001f5d1  Remove",
                       base + ["rm", "-f", name], USER,
                       f"Removes {name}. Named volumes survive; anything "
@@ -312,6 +362,8 @@ def container_bulk(provider, target, rows: list) -> list:
                           base + ["stop"] + running, USER,
                           "Stops every running container on this target, "
                           "in one command.", destructive=True))
+    if stopped:
+        out.append(remove_stopped(provider, target, rows))
     return out
 
 
@@ -373,6 +425,115 @@ def run_argv_from_inspect(binary: str, conn: list, inspect: dict, name: str,
     argv.append(config.get("Image") or inspect.get("Image", ""))
     argv += cmd
     return argv
+
+
+def rename_container(provider, target, name: str, new_name: str) -> Action:
+    """Rename in place — the one change that needs no rebuild.
+
+    Both engines support it, and it keeps the id, the volumes, the network
+    and whether the container is running; only the name changes.
+    """
+    base = [provider.binary] + _conn_args(provider, target)
+    return Action(
+        id=f"rename-{name}", label=f"Rename {name} to {new_name}",
+        command=base + ["rename", name, new_name], scope=USER,
+        explanation=(
+            f"Gives the container a new name. Nothing is recreated: the id, "
+            f"the volumes, the network and its state all stay as they "
+            f"are.\n\nOther containers that reach {name} by name \u2014 on a "
+            f"user-defined network, or through a compose file \u2014 will "
+            f"look for the old name until they are updated."))
+
+
+def recreate_container(provider, target, name: str) -> Action:
+    """Recreate a container from its own configuration.
+
+    What `run` did originally is read back from the container itself, so the
+    new one keeps its image tag, ports, volumes, environment and restart
+    policy. The point is to pick up a newer image, or a daemon setting that
+    only applies to new containers, without writing the run command again.
+    """
+    conn = _conn_args(provider, target)
+    base = [provider.binary] + conn
+    old_name = f"{name}-before-recreate-{_time.strftime('%Y%m%d%H%M%S')}"
+
+    ok, text = cli_text(base + ["inspect", name])
+    info = (json_value(text, []) or [{}])[0] if ok else {}
+    run_argv = run_argv_from_inspect(provider.binary, conn, info, name,
+                                     old_name, port_bindings(info))
+    steps = [base + ["stop", name], base + ["rename", name, old_name], run_argv]
+
+    def execute():
+        if not ok:
+            raise RuntimeError(f"could not inspect {name}: {text}")
+        for step in steps[:2]:
+            result = _run(step, note=f"recreate-{name}")
+            if not result.ok:
+                raise RuntimeError(result.output)
+        result = _run(steps[2], note=f"recreate-{name}")
+        if not result.ok:
+            _run(base + ["rename", old_name, name], note="recreate-rollback")
+            _run(base + ["start", name], note="recreate-rollback")
+            raise RuntimeError("the new container did not start, so the "
+                               "original was restored:\n" + result.output)
+        return (f"{name} was recreated from its own configuration.\nThe "
+                f"previous container is kept, stopped, as {old_name} \u2014 "
+                f"remove it once you are satisfied:  "
+                f"{provider.binary} rm {old_name}")
+
+    return Action(
+        id=f"recreate-{name}", label=f"Recreate {name}",
+        command=[], scope=USER,
+        shell_text="\n".join(" ".join(s) for s in steps),
+        explanation=(
+            f"Builds the container again from what it says about itself: the "
+            f"same image tag, ports, volumes, environment and restart "
+            f"policy.\n\n"
+            f"1. {name} is stopped.\n"
+            f"2. It is renamed {old_name} \u2014 nothing is deleted.\n"
+            f"3. A new {name} is created and started from the same "
+            f"configuration, taking its mounts from the old container with "
+            f"--volumes-from \u2014 which also carries the anonymous volumes "
+            f"a rewritten command line would quietly drop.\n\n"
+            f"If the new one fails to start, the original is renamed back and "
+            f"started again. Anything written inside the old container, "
+            f"outside a volume, stays in the old container."),
+        func=execute)
+
+
+def remove_stopped(provider, target, rows: list) -> Action:
+    """Remove every container that is not running, named one by one.
+
+    `prune` would do it in one command, but it decides for itself what
+    counts as unused; naming them is what lets someone read the list before
+    agreeing to it.
+    """
+    base = [provider.binary] + _conn_args(provider, target)
+    names = [r["Names"] for r in rows if not _is_running(r) and r.get("Names")]
+    steps = [base + ["rm", name] for name in names]
+
+    def execute():
+        failures = []
+        for step in steps:
+            result = _run(step, note="remove-stopped")
+            if not result.ok:
+                failures.append(f"{step[-1]}: {result.output.strip()}")
+        if failures:
+            raise RuntimeError("\n".join(failures))
+        return f"{len(steps)} stopped containers removed"
+
+    return Action(
+        id="rm-stopped", label=f"\U0001f9f9  Remove stopped ({len(names)})",
+        command=[], scope=USER,
+        shell_text="\n".join(" ".join(s) for s in steps),
+        explanation=(
+            "Removes the containers that are not running:\n\n  "
+            + ", ".join(names) +
+            "\n\nNamed volumes survive; anything written inside a container "
+            "and not in a volume goes with it, and images are not touched."
+            "\n\nkontainy names them rather than running `prune`, which "
+            "decides for itself what counts as unused."),
+        destructive=True, func=execute)
 
 
 def recreate_with_ports(provider, target, name: str, bindings: list) -> Action:
@@ -445,6 +606,10 @@ def _attach(cls):
     cls.inspect_ports = inspect_ports
     cls.recreate_with_ports = (lambda self, target, name, bindings:
                                recreate_with_ports(self, target, name, bindings))
+    cls.rename_container = (lambda self, target, name, new_name:
+                            rename_container(self, target, name, new_name))
+    cls.recreate_container = (lambda self, target, name:
+                              recreate_container(self, target, name))
 
 
 _attach(DockerProvider)

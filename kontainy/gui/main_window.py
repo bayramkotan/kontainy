@@ -39,6 +39,7 @@ from .pages.settings import CatalogPage
 from ..core.providers import PROVIDERS
 from ..core.registry import OS_KIND
 from .pages.platform import make_platform_page
+from .pages.app_settings import AppSettingsPage
 from .pages.tools import InstallPage
 from .styles import get_colors, get_theme
 from .window_menu import WindowMenuMixin
@@ -92,6 +93,7 @@ SIDEBAR = [
     ("SET UP", None),
     (None, InstallPage),
     (None, CatalogPage),
+    (None, AppSettingsPage),
     (None, PreferencesPage),
 
     ("LEARN", None),

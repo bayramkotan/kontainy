@@ -37,6 +37,15 @@ class KubernetesProvider(Provider):
                "namespace. The current context is where every kubectl "
                "command goes.")
 
+    def start_engine(self):
+        """Nothing to start: kubectl is a client.
+
+        Its services list carries k3s and friends for the Services tab, but
+        offering to start k3s on a machine that talks to a cluster elsewhere
+        would be a guess dressed as a fix.
+        """
+        return None
+
     def available(self) -> bool:
         """kubectl AND a cluster to point it at.
 
@@ -726,7 +735,10 @@ def _kube_object_actions(self, target, row):
     return [
         action(f"kubectl-logs-{name}", "\U0001f4dc  Logs",
                ["kubectl"] + ctx + ["-n", ns, "logs", "--tail=200", name],
-               "The last 200 lines from the pod's first container."),
+               "The last 200 lines from the pod's first container, and then "
+               "whatever it writes next while the window is open.",
+               follow=["kubectl"] + ctx + ["-n", ns, "logs", "--tail=200",
+                                           "--follow", "--timestamps", name]),
         action(f"kubectl-describe-{name}", "\u2139  Describe",
                ["kubectl"] + ctx + ["-n", ns, "describe", "pod", name],
                "Events, conditions and container states — where most "

@@ -49,6 +49,10 @@ class Action:
     shell_text: str = ""             # what to paste when scope is SHELL
     destructive: bool = False
     note: str = ""
+    # A command that never ends on its own: logs with --follow, a live
+    # stats stream. The window opens the log viewer for these instead of
+    # the run-once dialog, which would sit there filling memory forever.
+    follow: list = None
     # Some actions are not a command at all but a file kontainy writes itself
     # — libvirt's uri_default, for instance. They still go through the same
     # show-first dialog; shell_text then carries the equivalent command so the

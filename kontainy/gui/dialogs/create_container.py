@@ -440,7 +440,18 @@ class CreateContainerDialog(QDialog):
 
     # --- command construction ---------------------------------------------
     def _engine_binary(self) -> str:
+        """The binary AND the target it goes to.
+
+        Without the context, the preview showed `docker run ...` while the
+        container would land on whichever context happened to be active —
+        not necessarily the one chosen in this dialog.
+        """
         endpoint = self.engine_box.currentData()
+        provider = getattr(endpoint, "provider", None)
+        if provider is not None:
+            from ...core.providers.containers import _conn_args
+            return " ".join([provider.binary]
+                            + _conn_args(provider, endpoint.target))
         family = getattr(endpoint, "family", "docker")
         return "podman" if family == "podman" else "docker"
 
@@ -668,6 +679,14 @@ class CreateContainerDialog(QDialog):
             if answer != QMessageBox.Yes:
                 return
 
+        # A choice that knows its provider is created with that engine's own
+        # command — the one in the preview. Opening the socket ourselves
+        # cannot work on Windows named pipes, and it hid the command that
+        # this whole dialog exists to teach.
+        if getattr(endpoint, "provider", None) is not None:
+            self._create_via_cli(endpoint, command)
+            return
+
         from ...core import discovery
         client = discovery.client_for(endpoint)
         try:
@@ -683,6 +702,37 @@ class CreateContainerDialog(QDialog):
 
         history().add(command, engine=endpoint.family, note="create container")
         log().info("created container %s on %s", container_id, endpoint.address)
+        self.created.emit(container_id)
+        self.accept()
+
+    def _create_via_cli(self, endpoint, command: str) -> None:
+        """Run the previewed command through the run dialog."""
+        import shlex
+
+        from ...core.actions import Action, USER
+        from .run_command import RunCommandDialog
+        argv = shlex.split(command.replace("\\\n", " "))
+        argv = endpoint.provider.prepare(Action(
+            id="create-container", label="Create the container",
+            command=argv, scope=USER,
+            explanation=(
+                "This is the command in the preview, run as it stands. "
+                "Nothing else is created: if it fails, the engine's own "
+                "error is shown and no container is left behind."))).command
+        action = Action(
+            id="create-container", label="Create the container",
+            command=argv, scope=USER,
+            explanation=("The command from the preview, run as it stands. "
+                         "If it fails you see the engine's own error and "
+                         "nothing is left behind."))
+        dialog = RunCommandDialog(action, self)
+        dialog.exec()
+        result = getattr(dialog, "result_obj", None)
+        if result is None or not result.ok:
+            return
+        container_id = (result.output or "").strip().splitlines()[-1] \
+            if result.output.strip() else ""
+        history().add(command, engine=endpoint.family, note="create container")
         self.created.emit(container_id)
         self.accept()
 

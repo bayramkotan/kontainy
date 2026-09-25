@@ -86,8 +86,35 @@ def is_root() -> bool:
 # ---------------------------------------------------------------------------
 #  Running
 # ---------------------------------------------------------------------------
+class _Stopper:
+    """A handle on a running command: stop the whole tree, or ask if it lives."""
+
+    def __init__(self, proc):
+        self.proc = proc
+
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+    def stop(self) -> None:
+        if not self.alive():
+            return
+        try:
+            if os.name == "nt":
+                import signal
+                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                self.proc.terminate()
+            else:
+                os.killpg(os.getpgid(self.proc.pid), 15)
+        except (OSError, ValueError, AttributeError):
+            try:
+                self.proc.terminate()
+            except OSError:
+                pass
+
+
 def run_streaming(command: list, on_line, *, timeout: float = 900.0,
-                  note: str = "", record: bool = True) -> CommandResult:
+                  note: str = "", record: bool = True,
+                  should_stop=None, on_start=None) -> CommandResult:
     """Run a command and hand each line over as it appears.
 
     An install prints for minutes; capturing it all and showing it at the end
@@ -99,10 +126,19 @@ def run_streaming(command: list, on_line, *, timeout: float = 900.0,
     import time as _time
     shown = " ".join(command)
     lines = []
+    # Its own process group, so the whole tree can be stopped. Terminating
+    # the shell alone is not enough: its children keep the pipe open and the
+    # reading loop never ends — a log window would leave a process behind
+    # and Qt would abort with "QThread: Destroyed while thread is running".
+    extra = {}
+    if os.name == "nt":
+        extra["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        extra["start_new_session"] = True
     try:
         proc = subprocess.Popen(command, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True,
-                                bufsize=1, errors="replace")
+                                bufsize=1, errors="replace", **extra)
     except FileNotFoundError:
         result = CommandResult(shown, 127, "",
                                f"{command[0]}: command not found")
@@ -112,12 +148,23 @@ def run_streaming(command: list, on_line, *, timeout: float = 900.0,
     except OSError as exc:
         return CommandResult(shown, 1, "", str(exc))
 
+    # The caller gets the process itself: a follow that has gone quiet is
+    # blocked reading, so a flag checked between lines would never be seen.
+    # Closing the window terminates it directly.
+    if on_start is not None:
+        on_start(_Stopper(proc))
+
     deadline = _time.monotonic() + timeout
     try:
         for line in proc.stdout:
             line = line.rstrip("\n")
             lines.append(line)
             on_line(line)
+            # A follow never ends on its own; the caller says when to stop,
+            # and the process must die with the window that opened it.
+            if should_stop is not None and should_stop():
+                proc.terminate()
+                break
             if _time.monotonic() > deadline:
                 proc.kill()
                 on_line(f"\u2014 stopped after {timeout:.0f}s")
@@ -127,7 +174,10 @@ def run_streaming(command: list, on_line, *, timeout: float = 900.0,
         if proc.stdout:
             proc.stdout.close()
 
-    result = CommandResult(shown, proc.returncode or 0, "\n".join(lines), "")
+    code = proc.returncode or 0
+    if should_stop is not None and should_stop():
+        code = 0                      # stopped on purpose, not a failure
+    result = CommandResult(shown, code, "\n".join(lines), "")
     if record:
         history().add(shown, note=note, ok=result.ok)
     # A command the user asked for is news; a probe is not. `record` already

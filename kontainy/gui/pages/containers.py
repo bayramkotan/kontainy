@@ -40,6 +40,45 @@ STATE_COLORS = {
 ENGINES = ("docker", "podman")
 
 
+class EngineChoice:
+    """One place a container can be created: an engine on one of its targets.
+
+    Carries what the create dialog needs, and the provider and target so the
+    container is created with that engine's own CLI rather than by opening
+    its socket.
+    """
+
+    reachable = True
+
+    def __init__(self, provider, target, kind: str):
+        self.provider = provider
+        self.target = target
+        self.family = provider.id
+        self.address = target.address if target else ""
+        self.kind = kind
+        name = target.name if target else "(local)"
+        self.title = f"{provider.name} \u00b7 {name}"
+        if kind:
+            self.title += f"  ({kind})"
+
+
+def engine_choices() -> list:
+    """Every engine and target that answered, for the create dialog."""
+    out = []
+    for engine_id in ENGINES:
+        provider = by_id(engine_id)
+        if provider is None or not provider.shown_here() \
+                or not provider.available():
+            continue
+        for target in provider.targets():
+            listing = provider.objects(target)
+            if listing.error:
+                continue
+            out.append(EngineChoice(provider, target,
+                                    socket_kind(target.address)))
+    return out
+
+
 def _collect_all() -> list:
     """Every container on every context and connection of both engines.
 
@@ -131,6 +170,9 @@ class ContainersPage(Page):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # Several rows at once, as on a technology's own page: removing four
+        # containers is one request, not four clicks.
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.currentCellChanged.connect(self._show_detail)
@@ -298,10 +340,18 @@ class ContainersPage(Page):
 
     # --- creation ----------------------------------------------------------
     def _new_container(self, preset: str = "") -> None:
+        """Offer every context and connection of both engines.
+
+        This used to ask `discovery` for reachable sockets and open them
+        itself, so on Windows — where Docker listens on a named pipe — the
+        New button found nothing and did nothing at all. The choices now
+        come from the providers, the same as the table.
+        """
+        self.endpoints = engine_choices()
         if not self.endpoints:
-            self.endpoints = discovery.discover(probe=True)
-        if not any(e.reachable for e in self.endpoints):
-            self.status.emit("No reachable Docker or Podman engine was found")
+            self.status.emit(
+                "No container engine answered. Start Docker or Podman from "
+                "its own page, then try again.")
             return
         from ..dialogs.create_container import CreateContainerDialog
         dialog = CreateContainerDialog(self.endpoints, self, preset=preset)
@@ -334,6 +384,35 @@ class ContainersPage(Page):
                        if x.name == item["target"]), None)
         return provider, target
 
+    def _selected_items(self) -> list:
+        indexes = sorted({index.row() for index
+                          in self.table.selectionModel().selectedRows()})
+        return [self.filtered[i] for i in indexes if i < len(self.filtered)]
+
+    def _act_on_selection(self, action: str, items: list) -> None:
+        """The selection can span engines and contexts, so each group is
+        asked of its own provider: one selection, the right command for
+        every row."""
+        from ...core.providers.base import actions_for_selection
+        groups = {}
+        for item in items:
+            groups.setdefault((item["engine_id"], item["target"]),
+                              []).append(item)
+        wanted = {"start": "start", "stop": "stop", "restart": "restart",
+                  "remove": "remove"}[action]
+        for (engine_id, target_name), rows in groups.items():
+            provider, target = self._target_of(rows[0])
+            if provider is None:
+                continue
+            built = actions_for_selection(provider, target,
+                                          [r["raw"] for r in rows], wanted)
+            if built is None:
+                self.status.emit(
+                    f"{engine_id} / {target_name}: {action} does not apply to "
+                    f"all the selected rows")
+                continue
+            self._run(provider.prepare(built))
+
     def _act(self, action: str) -> None:
         """Run the engine's own verb on the container, on ITS context.
 
@@ -341,6 +420,10 @@ class ContainersPage(Page):
         action to whichever engine it had opened rather than the one the
         container actually lives on.
         """
+        items = self._selected_items()
+        if len(items) > 1:
+            self._act_on_selection(action, items)
+            return
         item = self._current()
         if item is None:
             return
@@ -348,7 +431,8 @@ class ContainersPage(Page):
         if provider is None:
             return
         wanted = {"start": "start", "stop": "stop", "restart": "restart",
-                  "remove": "remove"}[action]
+                  "remove": "remove", "recreate": "recreate",
+                  "rename": "rename"}[action]
         actions = {self._verb(a.label): a
                    for a in provider.object_actions(target, item["raw"])}
         chosen = actions.get(wanted)
@@ -365,8 +449,19 @@ class ContainersPage(Page):
         return "-".join(re.sub(r"[^A-Za-z0-9]+", " ", label).strip()
                         .lower().split())
 
+    def _open_logs(self, action) -> None:
+        """A follow goes to the log viewer, not to the run-once dialog,
+        which would wait for a command that never ends."""
+        from ..dialogs.logs_viewer import LogsDialog
+        self.show_command(" ".join(action.follow), note=action.id,
+                          record=False)
+        LogsDialog(action, self).exec()
+
     def _run(self, action) -> None:
         from ..dialogs.run_command import RunCommandDialog
+        if action.follow:
+            self._open_logs(action)
+            return
         self.show_command(action.display(), note=action.id, record=False)
         RunCommandDialog(action, self).exec()
         self.refresh()

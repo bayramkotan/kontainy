@@ -475,8 +475,24 @@ ky
 ```bash
 git clone https://github.com/bayramkotan/kontainy.git
 cd kontainy
+python main.py
+```
+
+That is the whole thing. With no PySide6 installed, kontainy shows the
+commands it would run, asks, and — if you agree — creates `.venv` beside the
+checkout, installs itself into it in editable mode, and starts the window
+from there. Nothing is installed into your system Python, and refusing is a
+normal answer: the commands are printed either way.
+
+`python main.py --setup` does it without asking, for a script;
+`python main.py --no-setup` never does, and prints the commands instead.
+
+Or do it by hand:
+
+```bash
+git clone https://github.com/bayramkotan/kontainy.git
+cd kontainy
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e .
 ```
 

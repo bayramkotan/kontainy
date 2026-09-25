@@ -246,6 +246,15 @@ def cmd_tech(args) -> int:
     if verb == "verbs":
         return _show_verbs(provider)
 
+    # Asked to start the engine, "not answering" is the reason for asking,
+    # not a reason to refuse.
+    if verb == "start-engine":
+        built = provider.start_engine()
+        if built is None:
+            return _fail(f"{provider.name} has nothing to start here \u2014 "
+                         f"it is a client, not a daemon")
+        return run_action(built, args, provider)
+
     if not provider.available() and verb not in ("shell", "verbs"):
         reason = provider.unavailable_reason().replace(
             "Install it from the Install tab.", "").strip()
@@ -380,6 +389,9 @@ def _show_verbs(provider) -> int:
     print(f"  test [NAME]             check one answers")
     print(f"  ls [--target NAME]      list {provider.object_noun_plural.lower()}")
     print(f"  start-all | stop-all    act on all of them")
+    if provider.start_engine() is not None:
+        print(f"  start-engine            start it when it is installed but "
+              f"not answering")
     print(f"  VERB NAME...            act on one or more; verbs depend on state,")
     print(f"                          e.g. start, stop, restart, logs, rm")
     if provider.services:

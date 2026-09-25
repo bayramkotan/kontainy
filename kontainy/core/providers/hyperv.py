@@ -118,6 +118,16 @@ class HyperVProvider(Provider):
 
     _refusal = ""
 
+    def start_engine(self):
+        from ..actions import Action, ROOT
+        return Action(
+            id="start-engine-hyperv", label="\u25b6  Start the Hyper-V service",
+            command=POWERSHELL + ["Start-Service vmms"], scope=ROOT,
+            explanation=(
+                "Starts the Hyper-V Virtual Machine Management service. If "
+                "Hyper-V itself is not enabled, this fails and the Install "
+                "tab is the place to go instead."))
+
     def unavailable_reason(self) -> str:
         if platform.system() != "Windows":
             return "Hyper-V exists only on Windows."
