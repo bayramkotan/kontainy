@@ -122,6 +122,85 @@ def read_facts(provider, target, reference: str) -> ImageFacts:
     return facts
 
 
+def networks(provider, target) -> list:
+    """The networks that exist on this target, with what each one means.
+
+    A container attached to the default bridge cannot reach another one by
+    name; on a user-defined network it can. That is the single most common
+    surprise in this ecosystem, so the list says which is which.
+    """
+    from .providers.base import cli_text
+    ok, text = cli_text(_conn(provider, target)
+                        + ["network", "ls", "--format", "{{json .}}"],
+                        timeout=15.0)
+    if not ok:
+        return []
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        name = item.get("Name") or item.get("name") or ""
+        driver = item.get("Driver") or item.get("driver") or ""
+        if not name:
+            continue
+        note = {
+            "bridge": "the default bridge \u2014 no name resolution between "
+                      "containers",
+            "host": "the host's own network stack; published ports are "
+                    "ignored",
+            "none": "no network at all",
+        }.get(name, f"{driver} \u00b7 containers on it reach each other by name"
+                    if driver == "bridge" else driver)
+        out.append({"name": name, "driver": driver, "note": note})
+    return out
+
+
+def volumes(provider, target) -> list:
+    """Named volumes that already exist, newest first."""
+    from .providers.base import cli_text
+    ok, text = cli_text(_conn(provider, target)
+                        + ["volume", "ls", "--format", "{{json .}}"],
+                        timeout=15.0)
+    if not ok:
+        return []
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        name = item.get("Name") or item.get("name") or ""
+        if name:
+            out.append({"name": name,
+                        "driver": item.get("Driver") or item.get("driver", ""),
+                        "mountpoint": item.get("Mountpoint", "")})
+    return out
+
+
+def suggest_volumes(facts: ImageFacts, name: str) -> list:
+    """`volume:path` lines for what the image declares as VOLUME.
+
+    An image that declares a volume gets an anonymous one on every run,
+    which is how people end up with a disk full of unnamed volumes and a
+    database that lost its data on recreate. Naming them is the fix, and
+    kontainy can name them before the mistake happens.
+    """
+    base = (name or facts.reference.split("/")[-1].split(":")[0] or "data")
+    out = []
+    for index, path in enumerate(facts.volumes):
+        stem = path.strip("/").replace("/", "-") or "data"
+        out.append(f"{base}-{stem}:{path}")
+    return out
+
+
 # --- suggestions --------------------------------------------------------------
 def suggest_name(reference: str, taken: list) -> str:
     """nginx:1.27 -> nginx; nginx-2 when nginx is taken."""

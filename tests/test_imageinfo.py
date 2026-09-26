@@ -128,3 +128,58 @@ def test_a_privileged_port_is_a_warning():
 
 def test_a_clean_form_says_nothing():
     assert ii.problems("web", "nginx:1.27", ["other"], ["8080"], ["9000"]) == []
+
+
+# --- networks and volumes ------------------------------------------------------
+NETWORKS = "\n".join(json.dumps(item) for item in [
+    {"Name": "bridge", "Driver": "bridge"},
+    {"Name": "host", "Driver": "host"},
+    {"Name": "none", "Driver": "null"},
+    {"Name": "lab", "Driver": "bridge"}])
+
+VOLUMES = "\n".join(json.dumps(item) for item in [
+    {"Name": "pgdata", "Driver": "local",
+     "Mountpoint": "/var/lib/docker/volumes/pgdata/_data"},
+    {"Name": "n8n_data", "Driver": "local"}])
+
+
+def test_networks_say_which_one_resolves_names(monkeypatch):
+    """A container on the default bridge cannot reach another by name; on a
+    user-defined network it can. That surprise is worth naming in the list."""
+    monkeypatch.setattr(base, "cli_text",
+                        lambda argv, timeout=15.0: (True, NETWORKS))
+    found = {n["name"]: n["note"] for n in
+             ii.networks(DockerProvider(), TARGET)}
+    assert "no name resolution" in found["bridge"]
+    assert "reach each other by name" in found["lab"]
+    assert "published ports are ignored" in found["host"]
+
+
+def test_volumes_that_exist_are_listed(monkeypatch):
+    monkeypatch.setattr(base, "cli_text",
+                        lambda argv, timeout=15.0: (True, VOLUMES))
+    assert [v["name"] for v in ii.volumes(DockerProvider(), TARGET)] == [
+        "pgdata", "n8n_data"]
+
+
+def test_an_images_volumes_are_offered_with_names():
+    """An image that declares VOLUME gets an anonymous one on every run —
+    which is how a database loses its data on the next recreate."""
+    facts = ii.ImageFacts(reference="postgres:16",
+                          volumes=["/var/lib/postgresql/data"])
+    assert ii.suggest_volumes(facts, "pg16") == [
+        "pg16-var-lib-postgresql-data:/var/lib/postgresql/data"]
+
+
+def test_the_volume_name_falls_back_to_the_image():
+    facts = ii.ImageFacts(reference="docker.io/library/redis:7",
+                          volumes=["/data"])
+    assert ii.suggest_volumes(facts, "") == ["redis-data:/data"]
+
+
+def test_an_engine_that_cannot_list_is_not_a_crash(monkeypatch):
+    monkeypatch.setattr(base, "cli_text",
+                        lambda argv, timeout=15.0: (False, "connection refused"))
+    assert ii.networks(DockerProvider(), TARGET) == []
+    assert ii.volumes(DockerProvider(), TARGET) == []
+    assert ii.local_images(DockerProvider(), TARGET) == []

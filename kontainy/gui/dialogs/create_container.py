@@ -52,6 +52,11 @@ class CreateContainerDialog(QDialog):
         self.existing_names = []
         self.taken_ports = []
         self.facts = None
+        # What kontainy itself filled in. A suggestion may be replaced when
+        # the image changes; something the user typed never is.
+        self.suggested = {}
+        self.template_image = ""
+        self.trouble = ""
         self.setWindowTitle("Create Container")
         self.resize(1080, 820)
         self._build()
@@ -232,7 +237,13 @@ class CreateContainerDialog(QDialog):
         self.add_hosts.setFixedHeight(60)
         self.publish_all = QCheckBox("Publish all exposed ports (-P)")
 
+        self.network_note = QLabel("")
+        self.network_note.setWordWrap(True)
+        self.network_note.setObjectName("hint")
+        self.network.currentTextChanged.connect(self._network_note)
+
         form.addRow("Network", self.network)
+        form.addRow("", self.network_note)
         form.addRow("Published ports", self.ports)
         form.addRow("Hostname", self.hostname)
         form.addRow("DNS servers", self.dns)
@@ -261,7 +272,18 @@ class CreateContainerDialog(QDialog):
         self.shm_size = QLineEdit()
         self.shm_size.setPlaceholderText("64m — raise to 1g for ML workloads")
 
+        self.volume_box = QComboBox()
+        self.volume_box.setToolTip(
+            "Volumes that already exist on this target. Choosing one adds a "
+            "line; you still say where it goes inside the container.")
+        self.volume_box.currentIndexChanged.connect(self._volume_chosen)
+        self.volume_note = QLabel("")
+        self.volume_note.setWordWrap(True)
+        self.volume_note.setObjectName("hint")
+
         form.addRow("Volumes / mounts", self.volumes)
+        form.addRow("Existing volumes", self.volume_box)
+        form.addRow("", self.volume_note)
         form.addRow("tmpfs mounts", self.tmpfs)
         form.addRow("", self.read_only)
         form.addRow("/dev/shm size", self.shm_size)
@@ -448,6 +470,14 @@ class CreateContainerDialog(QDialog):
         env = [f"{k}={v}" for k, v in template.env.items()]
         env += [f"{k}=CHANGE_ME" for k in template.env_required]
         self.env.setPlainText("\n".join(env))
+        # A template fills the form the way kontainy would, so changing the
+        # image afterwards may replace these — but anything typed by hand
+        # after that is the user's and stays.
+        self.template_image = template.image
+        self.suggested.update({"name": template.id,
+                               "ports": "\n".join(template.ports),
+                               "volumes": "\n".join(template.volumes),
+                               "env": "\n".join(env)})
         self.tmpfs.setPlainText("\n".join(template.tmpfs))
         self.read_only.setChecked(template.read_only)
         self.memory.setText(template.memory)
@@ -484,20 +514,49 @@ class CreateContainerDialog(QDialog):
         target = endpoint.target
 
         def gather():
+            """Each part on its own: a target with no networks command, or a
+            volume listing that fails, must not take the image list down
+            with it — which is exactly what happened when one exception was
+            swallowed for the lot."""
             from ...core import imageinfo
-            listing = provider.objects(target)
-            rows = [] if listing.error else listing.rows
-            taken_ports = []
-            for row in rows:
-                for part in str(row.get("Ports", "")).split(","):
-                    bit = part.strip().split("->")[0]
-                    if ":" in bit:
-                        taken_ports.append(bit.rsplit(":", 1)[-1])
-            return {"images": imageinfo.local_images(provider, target),
-                    "names": [str(r.get("Names", "")) for r in rows],
-                    "ports": taken_ports}
+            out = {"images": [], "names": [], "ports": [], "networks": [],
+                   "volumes": [], "trouble": []}
+            for key, work in (
+                ("images", lambda: imageinfo.local_images(provider, target)),
+                ("networks", lambda: imageinfo.networks(provider, target)),
+                ("volumes", lambda: imageinfo.volumes(provider, target)),
+            ):
+                try:
+                    out[key] = work()
+                except Exception as exc:                     # noqa: BLE001
+                    out["trouble"].append(f"{key}: {exc}")
+                    log().warning("create dialog: %s failed: %r", key, exc)
+            try:
+                listing = provider.objects(target)
+                rows = [] if listing.error else listing.rows
+                out["names"] = [str(r.get("Names", "")) for r in rows]
+                for row in rows:
+                    for part in str(row.get("Ports", "")).split(","):
+                        bit = part.strip().split("->")[0]
+                        if ":" in bit:
+                            out["ports"].append(bit.rsplit(":", 1)[-1])
+            except Exception as exc:                         # noqa: BLE001
+                out["trouble"].append(f"containers: {exc}")
+                log().warning("create dialog: containers failed: %r", exc)
+            return out
 
-        run_job(CallableJob(gather), self._context_ready, lambda _m: None)
+        run_job(CallableJob(gather), self._context_ready, self._context_failed)
+
+    def _context_failed(self, message: str) -> None:
+        """Say it, and keep saying it.
+
+        A dialog that quietly shows an empty image list teaches the user
+        that kontainy is broken rather than that something failed. Held in
+        `trouble` so the next preview does not wipe it off the screen.
+        """
+        log().warning("create dialog could not read the target: %s", message)
+        self.trouble = message
+        self._show_notes()
 
     def _context_ready(self, data) -> None:
         self.existing_names = data["names"]
@@ -512,7 +571,64 @@ class CreateContainerDialog(QDialog):
             self.image.addItem(label, item["reference"])
         self.image.setCurrentText(current)
         self.image.blockSignals(False)
+        if not data["images"]:
+            self.image.lineEdit().setPlaceholderText(
+                "No images on this target yet \u2014 type a reference, "
+                "e.g. docker.io/library/nginx:alpine")
+        elif not current.strip():
+            # Start on something real rather than an empty box: the dialog
+            # is here to suggest, and the first image is a suggestion the
+            # user can change in one click.
+            self.image.setCurrentIndex(0)
+            self._image_chosen()
+        if data.get("trouble"):
+            self._context_failed("; ".join(data["trouble"]))
+
+        # Real networks, not a fixed list: a container on the default bridge
+        # cannot reach another by name, and the note says so.
+        self.network_info = {n["name"]: n["note"] for n in data["networks"]}
+        chosen = self.network.currentText()
+        self.network.blockSignals(True)
+        self.network.clear()
+        for item in data["networks"]:
+            self.network.addItem(item["name"])
+        for extra in ("pasta", "slirp4netns", "container:<name>"):
+            if self.network.findText(extra) < 0:
+                self.network.addItem(extra)
+        self.network.setCurrentText(chosen or "bridge")
+        self.network.blockSignals(False)
+        self._network_note()
+
+        self.volume_box.blockSignals(True)
+        self.volume_box.clear()
+        self.volume_box.addItem("\u2014 add an existing volume \u2014", "")
+        for item in data["volumes"]:
+            self.volume_box.addItem(item["name"], item["name"])
+        self.volume_box.blockSignals(False)
+        self.volume_note.setText(
+            f"{len(data['volumes'])} named volumes on this target."
+            if data["volumes"] else
+            "No named volumes here yet. A path on the left of the colon that "
+            "is not a path becomes a NAMED volume, which survives the "
+            "container.")
         self._update_preview()
+
+    def _network_note(self, *_):
+        name = self.network.currentText().strip()
+        note = getattr(self, "network_info", {}).get(name, "")
+        if not note and name.startswith("container:"):
+            note = ("shares another container's network namespace \u2014 they "
+                    "see each other on localhost")
+        self.network_note.setText(note)
+
+    def _volume_chosen(self, *_):
+        name = self.volume_box.currentData()
+        if not name:
+            return
+        text = self.volumes.toPlainText().rstrip()
+        line = f"{name}:/path/in/container"
+        self.volumes.setPlainText((text + "\n" + line).strip())
+        self.volume_box.setCurrentIndex(0)
 
     def _image_reference(self) -> str:
         data = self.image.currentData()
@@ -536,12 +652,25 @@ class CreateContainerDialog(QDialog):
                             reference),
                 self._facts_ready, lambda _m: None)
 
+    def _mine(self, field: str, widget) -> bool:
+        """True when the box is empty or still holds kontainy's own guess.
+
+        Picking a template and then another image left the template's name
+        in place — "postgres" on top of a redis image — because the field
+        was simply "not empty".
+        """
+        current = (widget.toPlainText() if hasattr(widget, "toPlainText")
+                   else widget.text()).strip()
+        return not current or current == self.suggested.get(field, "")
+
     def _facts_ready(self, facts) -> None:
         from ...core import imageinfo
         self.facts = facts
-        if not self.name.text().strip():
-            self.name.setText(imageinfo.suggest_name(facts.reference,
-                                                     self.existing_names))
+        if self._mine("name", self.name):
+            suggestion = imageinfo.suggest_name(facts.reference,
+                                                self.existing_names)
+            self.name.setText(suggestion)
+            self.suggested["name"] = suggestion
         # The image's own values become the placeholders: an empty box now
         # means "what the image does", which is what the engine will use.
         self.command.setPlaceholderText(
@@ -550,12 +679,28 @@ class CreateContainerDialog(QDialog):
             " ".join(facts.entrypoint) or "override the image ENTRYPOINT")
         self.workdir.setPlaceholderText(facts.working_dir or "the image's own")
         self.user.setPlaceholderText(facts.user or "the image's own (often root)")
-        if facts.ports and not self.ports.toPlainText().strip():
+        if facts.ports and self._mine("ports", self.ports):
             lines = [f"{host}:{container.split('/')[0]}"
                      + ("" if container.endswith("tcp") else "/udp")
                      for container, host, _note in
                      imageinfo.suggest_ports(facts, self.taken_ports)]
-            self.ports.setPlainText("\n".join(lines))
+            text = "\n".join(lines)
+            self.ports.setPlainText(text)
+            self.suggested["ports"] = text
+        if facts.volumes and self._mine("volumes", self.volumes):
+            # An image that declares VOLUME gets an anonymous one on every
+            # run; that is how a database loses its data on the next
+            # recreate. Naming them is the fix, offered before the mistake.
+            text = "\n".join(
+                imageinfo.suggest_volumes(facts, self.name.text().strip()))
+            self.volumes.setPlainText(text)
+            self.suggested["volumes"] = text
+            self.volume_note.setText(
+                f"{facts.reference} declares "
+                f"{', '.join(facts.volumes)} as a volume. kontainy named "
+                f"them, so the data survives a recreate; leave them out and "
+                f"the engine makes an anonymous volume you will not find "
+                f"again.")
         if facts.env and not self.env.toPlainText().strip():
             self.env.setPlaceholderText(
                 "The image already sets: "
@@ -572,6 +717,22 @@ class CreateContainerDialog(QDialog):
         found = imageinfo.problems(
             self.name.text().strip(), self._image_reference(),
             self.existing_names, host_ports, self.taken_ports)
+        if self.trouble:
+            found.append(("warning",
+                          f"Could not read this target: {self.trouble}. You "
+                          f"can still type an image reference by hand; "
+                          f"kontainy simply has nothing to suggest from."))
+        image = self._image_reference()
+        template_id = self.template_box.currentData()
+        if template_id and self.template_image and image and \
+                image.split(":")[0].split("/")[-1] != \
+                self.template_image.split(":")[0].split("/")[-1]:
+            found.append((
+                "warning",
+                f"The template is for {self.template_image}, but the image "
+                f"is {image}. The environment, ports and volumes below came "
+                f"from the template and probably do not fit this image \u2014 "
+                f"set Template to \u2014 none \u2014 to clear them."))
         facts = getattr(self, "facts", None)
         if facts is not None and facts.reference == self._image_reference() \
                 and facts.needs_pull and self._image_reference():
@@ -581,6 +742,9 @@ class CreateContainerDialog(QDialog):
                           f"while and needs network."))
         if not found:
             self.notes.setVisible(False)
+            # The button is re-enabled here too: hiding the warnings without
+            # this left it disabled after the problem had been fixed.
+            self.ok_button.setEnabled(True)
             return
         colours = {"error": "#f38ba8", "warning": "#f9e2af"}
         marks = {"error": "\u26d4", "warning": "\u26a0"}
