@@ -20,6 +20,10 @@ from kontainy.utils import config as config_module
 def clean(monkeypatch, tmp_path):
     monkeypatch.setattr(config_module, "config", lambda: {})
     monkeypatch.setattr(terminal, "config", lambda: {})
+    # These are the Linux rules; macOS and Windows take their own branch,
+    # which the two tests at the end cover. Without this the file passed on
+    # Linux and failed on the other two runners.
+    monkeypatch.setattr(terminal.platform, "system", lambda: "Linux")
     for name in ("TERMINAL", "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP",
                  "DESKTOP_SESSION", "SHELL"):
         monkeypatch.delenv(name, raising=False)
@@ -134,3 +138,38 @@ def test_the_shown_command_matches_what_runs(monkeypatch):
     monkeypatch.setattr(shutil, "which", _installed("konsole"))
     shown = terminal.describe({"DOCKER_CONTEXT": "prod"})
     assert shown == "env DOCKER_CONTEXT=prod konsole"
+
+
+# --- the other two platforms ---------------------------------------------------
+def test_macos_asks_terminal_app_to_run_the_exports(monkeypatch):
+    monkeypatch.setattr(terminal.platform, "system", lambda: "Darwin")
+    started = {}
+    monkeypatch.setattr(terminal.subprocess, "Popen",
+                        lambda argv, **k: started.setdefault("argv", argv))
+    terminal.open_terminal({"DOCKER_CONTEXT": "prod"})
+    assert started["argv"][0] == "osascript"
+    assert "export DOCKER_CONTEXT='prod'" in started["argv"][-1]
+    assert "Terminal" in started["argv"][-1]
+
+
+def test_windows_prefers_windows_terminal_and_keeps_the_shell_open(
+        monkeypatch):
+    monkeypatch.setattr(terminal.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(shutil, "which", _installed("wt.exe"))
+    started = {}
+    monkeypatch.setattr(terminal.subprocess, "Popen",
+                        lambda argv, **k: started.setdefault("argv", argv))
+    terminal.open_terminal({"DOCKER_CONTEXT": "prod"})
+    assert started["argv"][0] == "wt.exe"
+    assert "-NoExit" in started["argv"], "a window that closes at once is no use"
+    assert "$env:DOCKER_CONTEXT='prod'" in started["argv"][-1]
+
+
+def test_windows_without_windows_terminal_still_opens_one(monkeypatch):
+    monkeypatch.setattr(terminal.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(shutil, "which", lambda *a, **k: None)
+    started = {}
+    monkeypatch.setattr(terminal.subprocess, "Popen",
+                        lambda argv, **k: started.setdefault("argv", argv))
+    terminal.open_terminal({})
+    assert started["argv"][:3] == ["cmd.exe", "/c", "start"]
