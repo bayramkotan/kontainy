@@ -253,6 +253,12 @@ class Provider:
         """
         from .. import hosts
         from ..registry import OS_KIND
+        # A remote host answers for everything: the server runs Linux, and
+        # what kontainy can manage there is decided by what is installed
+        # there, not by what this machine happens to be.
+        remote = hosts.active_host()
+        if remote.is_remote:
+            return remote if "linux" in self.platforms else None
         if OS_KIND in self.platforms:
             return hosts.LOCAL
         if OS_KIND == "windows" and "linux" in self.platforms \

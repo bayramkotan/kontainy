@@ -541,6 +541,106 @@ def _create_machine(provider, target, rest: list, args) -> int:
     return run_action(action, args, provider)
 
 
+def cmd_host(args) -> int:
+    """`ky host add prod target=deploy@server` and friends.
+
+    A host is a name, an ssh target and optionally a port, a key and a jump
+    host. No password is ever stored: kontainy connects with BatchMode, so
+    a key or an agent is the only way in and a prompt can never block a
+    background probe.
+    """
+    from .core import hosts
+    from .utils.config import config
+
+    action = args.action
+    rest = list(args.rest or [])
+    cfg = config()
+    entries = list(cfg.get("ssh_hosts") or [])
+
+    if action == "list":
+        active = (cfg.get("active_host") or "").strip()
+        print(f"{'':2}{'local':14} this machine"
+              + ("   \u2190 active" if not active else ""))
+        for entry in entries:
+            mark = "\u2190 active" if entry.get("name") == active else ""
+            extra = []
+            if entry.get("port"):
+                extra.append(f"port {entry['port']}")
+            if entry.get("jump"):
+                extra.append(f"via {entry['jump']}")
+            print(f"{'':2}{entry.get('name', ''):14} {entry.get('target', '')}"
+                  f"{'  ' + ', '.join(extra) if extra else ''}   {mark}")
+        known = [name for name in hosts.ssh_config_hosts()
+                 if name not in {e.get("name") for e in entries}]
+        if known:
+            print("\nin ~/.ssh/config, usable by name without adding them:")
+            print("  " + ", ".join(known[:20]))
+        return 0
+
+    if action == "local":
+        cfg.set("active_host", "")
+        print("kontainy is working on this machine again.")
+        return 0
+
+    if not rest:
+        return _fail(f"ky host {action} needs a name")
+    name = rest[0]
+
+    if action == "add":
+        try:
+            values = _values(rest[1:])
+        except ValueError as exc:
+            return _fail(str(exc))
+        target = values.get("target") or (name if "@" in name else "")
+        if not target:
+            return _fail("give the server as target=user@host")
+        entry = {"name": name, "target": target,
+                 "port": int(values.get("port") or 0),
+                 "identity": values.get("identity", ""),
+                 "jump": values.get("jump", "")}
+        entries = [e for e in entries if e.get("name") != name] + [entry]
+        cfg.set("ssh_hosts", entries)
+        ok, why = hosts.host_from_entry(entry).reach()
+        print(f"added {name} \u2192 {target}")
+        print("  reachable" if ok else f"  not reachable yet: {why}")
+        return 0
+
+    if action == "rm":
+        if not any(e.get("name") == name for e in entries):
+            return _fail(f"no host called {name}")
+        cfg["ssh_hosts"] = [e for e in entries if e.get("name") != name]
+        if (cfg.get("active_host") or "") == name:
+            cfg.set("active_host", "")
+        print(f"removed {name}")
+        return 0
+
+    host = hosts.named_host(name)
+    if host is None:
+        return _fail(f"no host called {name}; see: ky host list")
+
+    if action == "test":
+        ok, why = host.reach()
+        if not ok:
+            return _fail(f"{name}: {why}")
+        found = []
+        for binary in ("docker", "podman", "virsh", "incus", "lxc"):
+            if host.which(binary):
+                found.append(binary)
+        print(f"{name}: reachable \u00b7 "
+              + (", ".join(found) if found else "no container tools found"))
+        return 0
+
+    if action == "use":
+        ok, why = host.reach()
+        if not ok:
+            return _fail(f"{name}: {why}")
+        cfg.set("active_host", "" if host.kind == "local" else name)
+        print(f"kontainy now works on {name}." if host.kind != "local"
+              else "kontainy works on this machine.")
+        return 0
+    return _fail(f"unknown action {action}")
+
+
 def _services(provider) -> int:
     from .core import actions as act
     from .core.registry import OS_KIND
@@ -845,6 +945,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("gui", help="open the window")
     sub.add_parser("overview", help="every technology on this machine")
     sub.add_parser("tech", help="the technologies kontainy offers here")
+    p = sub.add_parser("host", help="servers kontainy manages over SSH")
+    p.add_argument("action", nargs="?", default="list",
+                   choices=["list", "add", "rm", "use", "test", "local"])
+    p.add_argument("rest", nargs="*", metavar="NAME|key=value")
+
     sub.add_parser("doctor", help="run the diagnostic rules")
     p = sub.add_parser("report", help="a system report to paste into an issue")
     p.add_argument("--short", action="store_true",
@@ -940,6 +1045,8 @@ def main(argv=None) -> int:
         from . import __main__ as entry
         return {"doctor": entry.cli_doctor, "scan": entry.cli_scan,
                 "stats": entry.cli_stats}[command]()
+    if command == "host":
+        return cmd_host(args)
     if command == "report":
         from .core import report as _report
         print(_report.build(full=not args.short))

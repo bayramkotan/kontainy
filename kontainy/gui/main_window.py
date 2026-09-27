@@ -19,7 +19,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QScrollArea,
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
-    QStackedWidget, QStatusBar, QVBoxLayout, QWidget,
+    QPushButton, QStackedWidget, QStatusBar, QVBoxLayout, QWidget,
 )
 
 from ..core.catalog import stats as catalog_stats
@@ -213,7 +213,20 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         self.tagline_label = QLabel(f"      {APP_TAGLINE}")
         self.tagline_label.setWordWrap(True)
         sl.addWidget(self.tagline_label)
-        sl.addSpacing(20)
+        sl.addSpacing(12)
+
+        # Where kontainy is working. A server has no display, which is the
+        # whole point: the engine runs there, the window is here.
+        self.host_button = QPushButton()
+        self.host_button.setObjectName("hostButton")
+        self.host_button.setCursor(Qt.PointingHandCursor)
+        self.host_button.setToolTip(
+            "Which machine kontainy manages. Every page follows this "
+            "choice.")
+        self.host_button.clicked.connect(self._choose_host)
+        self.host_button.setText(self._host_label())
+        sl.addWidget(self.host_button)
+        sl.addSpacing(12)
 
         self.stack = QStackedWidget()
         self.pages = {}
@@ -330,6 +343,35 @@ class MainWindow(WindowMenuMixin, QMainWindow):
             if page_class.NAME == name:
                 self._switch_page(i)
                 return
+
+    def _host_label(self) -> str:
+        from ..core import hosts
+        name = (self.config.get("active_host") or "").strip()
+        if not name:
+            return "\U0001f4bb  This machine"
+        return f"\U0001f310  {name}"
+
+    def _refresh_host_button(self) -> None:
+        self.host_button.setText(self._host_label())
+
+    def _choose_host(self) -> None:
+        from .dialogs.hosts import HostsDialog
+        before = (self.config.get("active_host") or "").strip()
+        HostsDialog(self).exec()
+        after = (self.config.get("active_host") or "").strip()
+        self._refresh_host_button()
+        if after != before:
+            # Everything on screen describes the other machine now.
+            log().info("Working on %s", after or "this machine")
+            self.status_label.setText(
+                f"Now working on {after or 'this machine'} \u2014 "
+                f"refreshing")
+            self._shown.clear()
+            page = self.page_list[self.stack.currentIndex()] \
+                if self.stack.currentIndex() < len(self.page_list) else None
+            if page is not None:
+                page.on_shown()
+                self._shown.add(page.NAME)
 
     def _open_setting(self, key: str) -> None:
         self.go("catalog")

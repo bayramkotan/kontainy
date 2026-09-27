@@ -94,6 +94,12 @@ DEFAULTS = {
     # its own profile. kontainy used to append $SHELL, which overrode that
     # profile and opened fish for someone whose Konsole runs bash.
     "terminal_shell": "",
+    # Where kontainy is working: "" is this machine, otherwise the name of
+    # one of the servers below.
+    "active_host": "",
+    # [{"name", "target", "port", "identity", "jump"}] — no passwords: a
+    # key or an agent is the way in, and BatchMode makes that explicit.
+    "ssh_hosts": [],
 
     # --- Catalogue --------------------------------------------------------
     "catalog_editable_only": False,
@@ -134,7 +140,8 @@ class Config:
             if isinstance(stored, dict):
                 self._data.update(stored)
         except (OSError, json.JSONDecodeError) as exc:
-            log().warning("Ayar dosyası okunamadı (%s): %s", self.path, exc)
+            log().warning("Could not read the settings file (%s): %s",
+                          self.path, exc)
 
     def save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
@@ -143,7 +150,8 @@ class Config:
                            encoding="utf-8")
             os.replace(tmp, self.path)
         except OSError as exc:
-            log().error("Ayar dosyası yazılamadı (%s): %s", self.path, exc)
+            log().error("Could not write the settings file (%s): %s",
+                        self.path, exc)
 
     def get(self, key: str, default=None):
         return self._data.get(key, DEFAULTS.get(key, default))

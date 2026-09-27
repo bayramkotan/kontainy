@@ -37,12 +37,31 @@ def test_window_geometry_is_not_editable():
     assert "window_x" not in _bound_keys()
 
 
+#: Settings that belong somewhere else in the window, not on the
+#: Preferences page — a server list edited by the host selector and
+#: `ky host`, and the per-rule switches on Diagnostics. They are listed
+#: here so "unreachable" keeps meaning "reachable nowhere".
+MANAGED_ELSEWHERE = {"active_host", "ssh_hosts", "diagnostics_disabled_rules"}
+
+
 def test_meaningful_share_of_defaults_is_reachable():
     geometry = {k for k in DEFAULTS if k.startswith("window_")}
     locked = {"always_show_command"}
     reachable = _bound_keys()
-    missing = set(DEFAULTS) - geometry - locked - reachable
+    missing = (set(DEFAULTS) - geometry - locked - MANAGED_ELSEWHERE
+               - reachable)
     assert len(missing) <= 3, f"too many settings unreachable: {missing}"
+
+
+def test_what_is_managed_elsewhere_really_is():
+    """Each exemption must be handled somewhere; otherwise the exemption is
+    just a way of hiding a setting nobody can change."""
+    import pathlib as _pathlib
+    root = _pathlib.Path(__file__).resolve().parents[1] / "kontainy"
+    sources = "\n".join(path.read_text(encoding="utf-8", errors="replace")
+                        for path in root.rglob("*.py"))
+    for key in MANAGED_ELSEWHERE:
+        assert sources.count(f'"{key}"') >= 2, key
 
 
 def test_all_sections_present():
