@@ -578,7 +578,7 @@ class PlatformPage(Page):
         self.tabs.setTabEnabled(0, available)
         self.tabs.setTabEnabled(1, available)
         if not available:
-            self.version_label.setText("not installed")
+            self.version_label.setText(provider.unavailable_label())
             self.count_label.setText("")
             self.info_label.setText(
                 f"<span style='color:{c['warning']}'>\u26a0 "
@@ -587,7 +587,8 @@ class PlatformPage(Page):
             self._filling = True
             self.selector.clear()
             self._filling = False
-            self.status.emit(f"{provider.name} is not installed")
+            self.status.emit(f"{provider.name}: "
+                             f"{provider.unavailable_label()}")
             return
 
         # --- selector ---

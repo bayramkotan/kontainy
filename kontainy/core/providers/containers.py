@@ -592,6 +592,14 @@ def recreate_with_ports(provider, target, name: str, bindings: list) -> Action:
         func=execute)
 
 
+def describe_command(provider, target, row) -> str:
+    name = str(row.get("Names", "") or row.get("name", ""))
+    if not name:
+        return ""
+    argv = [provider.binary] + _conn_args(provider, target) + ["inspect", name]
+    return provider.shown(argv)
+
+
 def _attach(cls):
     cls.object_key = "Names"
     cls.object_actions = lambda self, target, row: container_actions(self, target, row)
@@ -606,6 +614,8 @@ def _attach(cls):
     cls.inspect_ports = inspect_ports
     cls.recreate_with_ports = (lambda self, target, name, bindings:
                                recreate_with_ports(self, target, name, bindings))
+    cls.describe_command = (lambda self, target, row:
+                            describe_command(self, target, row))
     cls.rename_container = (lambda self, target, name, new_name:
                             rename_container(self, target, name, new_name))
     cls.recreate_container = (lambda self, target, name:

@@ -46,7 +46,8 @@ TECH_ALIASES = {
 }
 
 TARGET_VERBS = ("targets", "use", "add", "rm-target", "test")
-TECH_VERBS = TARGET_VERBS + ("ls", "start-all", "stop-all", "services",
+TECH_VERBS = TARGET_VERBS + ("ls", "create", "start-all", "stop-all",
+                             "services",
                              "service", "shell", "ports", "verbs")
 
 
@@ -334,6 +335,10 @@ def cmd_tech(args) -> int:
               f"to {verb.split('-')[0]}.")
         return 0
 
+    # --- create ---
+    if verb == "create":
+        return _create(provider, target, rest, args)
+
     # --- services ---
     if verb == "services":
         return _services(provider)
@@ -388,6 +393,10 @@ def _show_verbs(provider) -> int:
     print(f"  rm-target NAME          remove one")
     print(f"  test [NAME]             check one answers")
     print(f"  ls [--target NAME]      list {provider.object_noun_plural.lower()}")
+    from .core import vmcreate
+    if provider.can_edit_ports() or vmcreate.supported(provider):
+        print("  create [NAME] key=value create one \u2014 run without values "
+              "to see the fields")
     print(f"  start-all | stop-all    act on all of them")
     if provider.start_engine() is not None:
         print(f"  start-engine            start it when it is installed but "
@@ -405,6 +414,131 @@ def _show_verbs(provider) -> int:
         print(f"  {section.id:22}  {section.title.lower()}: ls, ACTION NAME"
               + (", create key=value ..." if section.create else ""))
     return 0
+
+
+def _create(provider, target, rest: list, args) -> int:
+    """`ky docker create web image=nginx:1.27 ports=8080:80`.
+
+    The same builder and the same checks as the window, so the two cannot
+    drift: a name already taken is refused here in the same words.
+    """
+    from .core import containercreate, imageinfo, vmcreate
+    if not provider.can_edit_ports():
+        return _create_machine(provider, target, rest, args)
+    if not rest:
+        print(containercreate.describe_fields(provider))
+        return 2
+
+    name, pairs = "", []
+    for item in rest:
+        if "=" in item:
+            pairs.append(item)
+        elif not name:
+            name = item
+        else:
+            return _fail(f"unexpected argument {item!r}; after the name, "
+                         f"everything is key=value")
+    try:
+        values = _values(pairs)
+    except ValueError as exc:
+        return _fail(str(exc))
+    if name:
+        values["name"] = name
+
+    listing = provider.objects(target)
+    rows = [] if listing.error else listing.rows
+    existing = [str(row.get("Names", "")) for row in rows]
+    taken_ports = []
+    for row in rows:
+        for part in str(row.get("Ports", "")).split(","):
+            bit = part.strip().split("->")[0]
+            if ":" in bit:
+                taken_ports.append(bit.rsplit(":", 1)[-1])
+
+    facts = None
+    if values.get("image"):
+        facts = imageinfo.read_facts(provider, target, values["image"])
+        if facts.local and facts.ports and not values.get("ports"):
+            # The same suggestion the window makes, said out loud so the
+            # command that runs is never a surprise.
+            suggested = imageinfo.suggest_ports(facts, taken_ports)
+            values["ports"] = ",".join(f"{host}:{container.split('/')[0]}"
+                                       for container, host, _note in suggested)
+            print(f"[ports taken from the image: {values['ports']}]")
+
+    plan = containercreate.build(provider, target, values, existing,
+                                 taken_ports, facts)
+    for severity, text in plan.problems:
+        print(("\u26d4  " if severity == "error" else "\u26a0  ") + text,
+              file=sys.stderr)
+    if plan.refused:
+        return 2
+
+    from .core.actions import Action, USER
+    action = Action(
+        id=f"create-{plan.values.get('name', 'container')}",
+        label=f"Create {plan.values.get('name', 'the container')}",
+        command=plan.argv, scope=USER,
+        explanation=("Runs exactly this. If it fails you see the engine's "
+                     "own error and nothing is left behind."))
+    return run_action(action, args, provider)
+
+
+def _create_machine(provider, target, rest: list, args) -> int:
+    """`ky kvm create lab memory=4096 disk=40 iso=...`.
+
+    Same shape as the container half: the fields on their own, the command
+    shown before it runs, and the mistakes that cost an afternoon caught
+    first — memory in GiB where MiB was meant, a disk path that does not
+    exist, a network that is not there, no ISO at all.
+    """
+    from .core import vmcreate
+    if not vmcreate.supported(provider):
+        return _fail(f"{provider.name} has no create yet; see: "
+                     f"ky {provider.id} verbs")
+    if not rest:
+        print(vmcreate.describe_fields(provider))
+        return 2
+
+    name, pairs = "", []
+    for item in rest:
+        if "=" in item:
+            pairs.append(item)
+        elif not name:
+            name = item
+        else:
+            return _fail(f"unexpected argument {item!r}; after the name, "
+                         f"everything is key=value")
+    try:
+        values = _values(pairs)
+    except ValueError as exc:
+        return _fail(str(exc))
+    values["name"] = name
+
+    listing = provider.objects(target)
+    existing = [] if listing.error else [
+        str(row.get(provider.object_key, "")) for row in listing.rows]
+    networks = []
+    for section in provider.sections():
+        if section.id in ("networks", "switches"):
+            found = section.listing(target)
+            if not found.error:
+                networks = [str(row.get(section.key, ""))
+                            for row in found.rows]
+
+    plan = vmcreate.build(provider, target, values, existing, networks)
+    for severity, text in plan.problems:
+        print(("\u26d4  " if severity == "error" else "\u26a0  ") + text,
+              file=sys.stderr)
+    if plan.refused:
+        return 2
+
+    from .core.actions import Action, USER
+    action = Action(
+        id=f"create-vm-{values['name']}", label=f"Create {values['name']}",
+        command=plan.argv, scope=USER,
+        explanation=plan.note or "Creates the virtual machine.")
+    return run_action(action, args, provider)
 
 
 def _services(provider) -> int:

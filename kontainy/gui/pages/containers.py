@@ -37,7 +37,11 @@ STATE_COLORS = {
     "paused": "#f9e2af", "dead": "#f38ba8", "stopped": "#9399b2",
 }
 
-ENGINES = ("docker", "podman")
+#: Which technologies a unified page gathers. The page itself is the same;
+#: only this list and a couple of labels differ, which is why "All machines"
+#: is a subclass rather than a second page written twice.
+ENGINES = ("docker", "podman", "incus", "lxd")
+MACHINE_ENGINES = ("libvirt", "hyperv", "vmware")
 
 
 class EngineChoice:
@@ -62,10 +66,14 @@ class EngineChoice:
             self.title += f"  ({kind})"
 
 
-def engine_choices() -> list:
-    """Every engine and target that answered, for the create dialog."""
+def engine_choices(engines=("docker", "podman")) -> list:
+    """Every engine and target that answered, for the create dialog.
+
+    Creation still goes through Docker and Podman only; Incus and LXD are
+    listed on the page but their create is not written yet.
+    """
     out = []
-    for engine_id in ENGINES:
+    for engine_id in engines:
         provider = by_id(engine_id)
         if provider is None or not provider.shown_here() \
                 or not provider.available():
@@ -79,14 +87,27 @@ def engine_choices() -> list:
     return out
 
 
-def _collect_all() -> list:
+def _first(item: dict, *keys) -> str:
+    """The first key that is actually there.
+
+    Every technology spells its columns differently — Names, name, Name,
+    State, state — and a page that assumes Docker's shows a row with an
+    empty name for Hyper-V.
+    """
+    for key in keys:
+        if key and item.get(key) not in (None, ""):
+            return str(item[key])
+    return ""
+
+
+def _collect_all(engines=ENGINES) -> list:
     """Every container on every context and connection of both engines.
 
     One row per container, tagged with the target it came from, so the table
     can say where each one lives and the filter can narrow to one source.
     """
     rows = []
-    for engine_id in ENGINES:
+    for engine_id in engines:
         provider = by_id(engine_id)
         if provider is None or not provider.shown_here() \
                 or not provider.available():
@@ -98,16 +119,23 @@ def _collect_all() -> list:
                               listing.error.splitlines()[0])
                 continue
             for item in listing.rows:
+                # Every technology names its columns differently: Docker has
+                # Names and Image, Incus has name and type, virsh has name
+                # and state. The page reads them through the provider's own
+                # key rather than assuming Docker's.
                 rows.append({
                     "engine": provider.name, "engine_id": engine_id,
                     "target": target.name, "address": target.address,
                     "kind": socket_kind(target.address),
                     "active": target.active,
-                    "name": str(item.get("Names", "")),
-                    "image": str(item.get("Image", "")),
-                    "state": str(item.get("State", "")).lower(),
-                    "status": str(item.get("Status", "")),
-                    "ports": str(item.get("Ports", "")),
+                    "name": _first(item, provider.object_key, "Names",
+                                   "name", "Name"),
+                    "image": _first(item, "Image", "image", "os", "type",
+                                    "Guest OS", "guest"),
+                    "state": _first(item, "State", "state", "Status").lower(),
+                    "status": _first(item, "Status", "status", "uptime",
+                                     "Uptime"),
+                    "ports": _first(item, "Ports", "ports"),
                     "raw": item,
                 })
     return rows
@@ -115,21 +143,29 @@ def _collect_all() -> list:
 
 class ContainersPage(Page):
     NAME = "containers"
-    TITLE = "Containers"
+    TITLE = "All containers"
     ICON = "📦"
     SUBTITLE = ("Containers from every engine, every context and every "
                 "connection, in one table \u2014 with the source of each one "
                 "named, so a container is never \"lost\".")
+
+    #: What this page gathers, and what it calls the things it found.
+    ENGINES = ENGINES
+    NOUN = "containers"
+    SECOND_COLUMN = "Image"
+    CAN_CREATE = True
+    SHOW_PORTS = True
 
     def build(self) -> None:
         self.endpoints = []
         self.rows = []
         self.filtered = []
 
-        self.add_tool_button("\u2795  New", self._new_container,
-                             kind="primary")
-        self.add_tool_button("\U0001f4e6  Template\u2026",
-                             self._from_template)
+        if self.CAN_CREATE:
+            self.add_tool_button("\u2795  New", self._new_container,
+                                 kind="primary")
+            self.add_tool_button("\U0001f4e6  Template\u2026",
+                                 self._from_template)
         self.refresh_btn = self.add_tool_button(
             "\U0001f504  Refresh", self.refresh)
         self.add_tool_button("\u25b6  Start", lambda: self._act("start"))
@@ -165,8 +201,8 @@ class ContainersPage(Page):
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Engine", "Context / Connection", "Name", "Image", "State",
-             "Status", "Socket"])
+            ["Engine", "Context / Connection", "Name", self.SECOND_COLUMN,
+             "State", "Status", "Socket"])
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -183,7 +219,8 @@ class ContainersPage(Page):
         self.tab_ports = QTextBrowser()
         self.tab_raw = QTextBrowser()
         self.detail.addTab(self.tab_summary, "Summary")
-        self.detail.addTab(self.tab_ports, "Ports")
+        if self.SHOW_PORTS:
+            self.detail.addTab(self.tab_ports, "Ports")
         self.detail.addTab(self.tab_raw, "Raw JSON")
         split.addWidget(self.detail)
         split.setSizes([420, 260])
@@ -211,7 +248,8 @@ class ContainersPage(Page):
         self.refresh_btn.setEnabled(False)
         self.busy.emit(True)
         self.status.emit("Reading every context and connection\u2026")
-        run_job(CallableJob(_collect_all), self._fill, self._failed)
+        run_job(CallableJob(_collect_all, self.ENGINES), self._fill,
+                self._failed)
 
     def _sources(self) -> list:
         """(engine_id, target name) pairs seen in the rows, active first."""
@@ -247,7 +285,7 @@ class ContainersPage(Page):
         self.busy.emit(False)
         self._fill_sources()
         self._apply_filter()
-        log().info("Containers: %d from %d source(s)", len(rows),
+        log().info("%s: %d from %d source(s)", self.TITLE, len(rows),
                    len(self._sources()))
 
     def _apply_filter(self) -> None:
@@ -282,7 +320,7 @@ class ContainersPage(Page):
         running = sum(1 for x in self.filtered if x["state"] == "running")
         sources = len(self._sources())
         self.count_label.setText(
-            f"{len(self.filtered)}/{len(self.rows)} containers \u00b7 "
+            f"{len(self.filtered)}/{len(self.rows)} {self.NOUN} \u00b7 "
             f"{running} running \u00b7 {sources} "
             f"source{'s' if sources != 1 else ''}")
         if self.filtered:
@@ -303,6 +341,7 @@ class ContainersPage(Page):
 
         provider = by_id(item["engine_id"])
         noun = provider.target_noun if provider else "Target"
+        second = item["image"] or "\u2014"
         self.tab_summary.setHtml(
             f"<h2>{item['name']}</h2>"
             f"<table cellpadding='4'>"
@@ -311,7 +350,8 @@ class ContainersPage(Page):
             f"{' — active' if item['active'] else ''}</td></tr>"
             f"<tr><td><b>Socket</b></td><td><code>{item['address']}</code>"
             f"{'<br>' + item['kind'] if item['kind'] else ''}</td></tr>"
-            f"<tr><td><b>Image</b></td><td>{item['image']}</td></tr>"
+            f"<tr><td><b>{self.SECOND_COLUMN}</b></td>"
+            f"<td>{second}</td></tr>"
             f"<tr><td><b>State</b></td><td>{item['state']} \u2014 "
             f"{item['status']}</td></tr>"
             f"</table>")
@@ -332,11 +372,19 @@ class ContainersPage(Page):
         self.tab_raw.setHtml(
             f"<pre>{json.dumps(item['raw'], indent=2, ensure_ascii=False)}</pre>")
 
-        flag = "--context" if item["engine_id"] == "docker" else "--connection"
-        scope = "" if item["target"] in ("(local)", "") else \
-            f" {flag} {item['target']}"
-        self.show_command(f"{item['engine_id']}{scope} inspect {item['name']}",
+        # The command that describes THIS object, asked of its own provider:
+        # "libvirt --connection system inspect win11" is not a command anyone
+        # can run, and that is what assuming Docker's shape produced on the
+        # machines page.
+        self.show_command(self._detail_command(item),
                           engine=item["engine_id"], record=False)
+
+    def _detail_command(self, item) -> str:
+        """Asked of the provider, because only it knows its own words."""
+        provider, target = self._target_of(item)
+        if provider is None:
+            return ""
+        return provider.describe_command(target, item["raw"]) or ""
 
     # --- creation ----------------------------------------------------------
     def _new_container(self, preset: str = "") -> None:
@@ -347,7 +395,7 @@ class ContainersPage(Page):
         New button found nothing and did nothing at all. The choices now
         come from the providers, the same as the table.
         """
-        self.endpoints = engine_choices()
+        self.endpoints = engine_choices(("docker", "podman"))
         if not self.endpoints:
             self.status.emit(
                 "No container engine answered. Start Docker or Podman from "
@@ -494,3 +542,27 @@ class ContainersPage(Page):
         if provider is None or target is None:
             return
         self._run(provider.prepare(provider.activate(target)))
+
+
+class MachinesPage(ContainersPage):
+    """The same table, for the hypervisors.
+
+    KVM, Hyper-V and VMware answer the same question — where is my machine,
+    and which host is it on — and the page that answers it for containers
+    already knows how to ask every provider in turn, mark the active target
+    and act on a selection. Only the list of technologies and three labels
+    differ.
+    """
+
+    NAME = "machines"
+    TITLE = "All machines"
+    ICON = "\U0001f5a5"
+    SUBTITLE = ("Virtual machines from every hypervisor and every connection, "
+                "in one table \u2014 KVM, Hyper-V and VMware side by side, "
+                "with the host of each one named.")
+
+    ENGINES = MACHINE_ENGINES
+    NOUN = "machines"
+    SECOND_COLUMN = "Guest OS"
+    CAN_CREATE = False          # ky kvm create does this; the wizard is next
+    SHOW_PORTS = False          # a machine publishes no ports

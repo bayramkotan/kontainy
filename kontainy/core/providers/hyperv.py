@@ -118,6 +118,13 @@ class HyperVProvider(Provider):
 
     _refusal = ""
 
+    def describe_command(self, target, row) -> str:
+        name = str(row.get("Name", "") or row.get("name", ""))
+        if not name:
+            return ""
+        return self.shown(POWERSHELL + [
+            f"Get-VM -Name '{name}' | Format-List *"])
+
     def start_engine(self):
         from ..actions import Action, ROOT
         return Action(

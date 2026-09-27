@@ -191,6 +191,11 @@ class VMwareProvider(Provider):
         listing.rows = sorted(seen.values(), key=lambda r: r["name"].lower())
         return listing
 
+    def describe_command(self, target, row) -> str:
+        """vmrun has no info verb; the .vmx file IS the machine's config."""
+        path = str(row.get("path", "") or row.get("vmx", ""))
+        return f"cat {path}" if path else ""
+
     def object_actions(self, target, row):
         vmrun = vmrun_path() or "vmrun"
         vmx = row.get("vmx", "")

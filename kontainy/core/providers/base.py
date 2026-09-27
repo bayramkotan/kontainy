@@ -344,6 +344,34 @@ class Provider:
                 f"this session; use the Services tab to have it start at "
                 f"boot as well."))
 
+    #: Verbs that mean "tell me about this one", whatever a tool calls them.
+    DETAIL_VERBS = ("info", "describe", "inspect", "details", "config")
+
+    def describe_command(self, target, row) -> str:
+        """The command that describes ONE object, in this tool's own words.
+
+        `virsh dominfo`, `docker inspect`, `Get-VM | Format-List` — the
+        unified pages used to build "<id> inspect <name>" for everything,
+        which produced `libvirt --connection system inspect win11`: a
+        command nobody can run.
+        """
+        from .base import Action  # noqa: F401  (documentation only)
+        for action in self.object_actions(target, row):
+            label = action.label.lower()
+            if any(word in label for word in self.DETAIL_VERBS):
+                return self.prepare(action).display()
+        return ""
+
+    def unavailable_label(self) -> str:
+        """Two or three words for the top bar when this cannot be used.
+
+        "not installed" is wrong whenever the tool IS installed and
+        something else is missing: the Kubernetes page said "not installed"
+        beside an Install tab offering to REMOVE kubectl, which is only
+        confusing. (Bayram, 2026-09-26.)
+        """
+        return "not installed"
+
     def unavailable_reason(self) -> str:
         host = self.host()
         if host is not None and host.is_wsl:

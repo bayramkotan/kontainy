@@ -34,19 +34,82 @@ LINUX_TERMINALS = [
 ]
 
 
-def _chosen() -> tuple:
-    """(binary, argv prefix) honouring the Preferences choice."""
-    name = (config().get("terminal_emulator") or "").strip()
+#: What each desktop considers its own terminal. Asked before the list,
+#: because "the first one installed" is not the same as "the one this
+#: desktop opens", and a KDE user with kitty installed still expects
+#: Konsole.
+DESKTOP_TERMINALS = {
+    "kde": "konsole", "plasma": "konsole",
+    "gnome": "gnome-terminal", "cinnamon": "gnome-terminal",
+    "xfce": "xfce4-terminal", "mate": "mate-terminal",
+    "lxqt": "qterminal", "deepin": "deepin-terminal",
+    "budgie": "gnome-terminal", "pantheon": "io.elementary.terminal",
+}
+
+
+def desktop_terminal() -> str:
+    """The terminal this desktop session would open, if it can be told."""
+    session = " ".join(filter(None, [
+        os.environ.get("XDG_CURRENT_DESKTOP", ""),
+        os.environ.get("XDG_SESSION_DESKTOP", ""),
+        os.environ.get("DESKTOP_SESSION", "")])).lower()
+    for key, binary in DESKTOP_TERMINALS.items():
+        if key in session and shutil.which(binary):
+            return binary
+    return ""
+
+
+def _prefix_for(binary: str) -> list:
+    for known, prefix in LINUX_TERMINALS:
+        if known == binary:
+            return prefix
     flag = (config().get("terminal_arg") or "-e").strip()
+    return [binary, flag]
+
+
+def _chosen() -> tuple:
+    """(binary, argv prefix), in the order a user would expect.
+
+    1. what they chose in Preferences,
+    2. $TERMINAL, which is how people say it on Arch and CachyOS,
+    3. xdg-terminal-exec, the freedesktop way to ask for "the" terminal,
+    4. what this desktop environment uses,
+    5. the first one installed, which is where this started and is the
+       worst of the five.
+    """
+    name = (config().get("terminal_emulator") or "").strip()
     if name and shutil.which(name):
-        for binary, prefix in LINUX_TERMINALS:
-            if binary == name:
-                return binary, prefix
-        return name, [name, flag]
+        return name, _prefix_for(name)
+
+    from_env = (os.environ.get("TERMINAL") or "").strip()
+    if from_env and shutil.which(from_env):
+        return from_env, _prefix_for(from_env)
+
+    if shutil.which("xdg-terminal-exec"):
+        return "xdg-terminal-exec", ["xdg-terminal-exec"]
+
+    preferred = desktop_terminal()
+    if preferred:
+        return preferred, _prefix_for(preferred)
+
     for binary, prefix in LINUX_TERMINALS:
         if shutil.which(binary):
             return binary, prefix
     return "", []
+
+
+def login_shell() -> str:
+    """The shell to start, or "" for the terminal's own.
+
+    Empty is the default and the right one: a terminal already knows which
+    shell to run — the one configured in its profile. kontainy used to
+    append $SHELL, which overrode that profile and opened fish for someone
+    whose Konsole runs bash. Forcing a shell is now something you ask for.
+    """
+    chosen = (config().get("terminal_shell") or "").strip()
+    if chosen and (shutil.which(chosen) or os.path.isabs(chosen)):
+        return chosen
+    return ""
 
 
 def describe(env: dict) -> str:
@@ -55,7 +118,11 @@ def describe(env: dict) -> str:
     if platform.system() == "Windows":
         sets = "; ".join(f"$env:{k}='{v}'" for k, v in env.items())
         return f"wt.exe powershell -NoExit -Command \"{sets}\"" if env else "wt.exe"
-    return f"env {exports} $SHELL" if env else "$SHELL"
+    shell = login_shell()
+    if shell:
+        return f"env {exports} {shell}" if env else shell
+    binary = _chosen()[0] or "your terminal"
+    return f"env {exports} {binary}" if env else binary
 
 
 def open_terminal(env: dict) -> str:
@@ -80,8 +147,10 @@ def open_terminal(env: dict) -> str:
             raise RuntimeError(
                 "No terminal emulator was found. Choose one in "
                 "Preferences \u2192 Terminal.")
-        shell = os.environ.get("SHELL") or "/bin/sh"
-        argv = prefix + [shell]
+        shell = login_shell()
+        # No shell named: start the terminal itself, so it opens whatever
+        # its own profile says. The environment still carries the target.
+        argv = (prefix + [shell]) if shell else [binary]
 
     log().info("opening terminal: %s  env=%s", argv, env)
     subprocess.Popen(argv, env=merged, start_new_session=True,

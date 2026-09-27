@@ -90,6 +90,10 @@ DEFAULTS = {
     # Used by "Open in Terminal". Empty means auto-detect.
     "terminal_emulator": "",
     "terminal_arg": "-e",
+    # Empty means: do not tell the terminal which shell to run, so it uses
+    # its own profile. kontainy used to append $SHELL, which overrode that
+    # profile and opened fish for someone whose Konsole runs bash.
+    "terminal_shell": "",
 
     # --- Catalogue --------------------------------------------------------
     "catalog_editable_only": False,

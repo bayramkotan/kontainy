@@ -34,7 +34,11 @@ def _summarise(provider) -> dict:
     """One card's worth of facts, gathered off the GUI thread."""
     out = {"id": provider.id, "available": provider.available(),
            "version": "", "active": None, "targets": 0, "objects": None,
-           "error": "", "services_up": 0, "services_total": 0}
+           "error": "", "services_up": 0, "services_total": 0,
+           "label": "", "reason": ""}
+    if not out["available"]:
+        out["label"] = provider.unavailable_label()
+        out["reason"] = provider.unavailable_reason()
     if out["available"]:
         out["version"] = provider.version()
         targets = provider.targets()
@@ -75,7 +79,8 @@ def _probe_all(providers: list) -> list:
                         if info["objects"] is not None else "unreachable"),
                        took)
         else:
-            log().info("%-14s not installed \u00b7 %.0f ms", provider.name, took)
+            log().info("%-14s %s \u00b7 %.0f ms", provider.name,
+                       info["label"] or "not installed", took)
         out.append(info)
     return out
 
@@ -216,13 +221,18 @@ class OverviewPage(Page):
             card["raw"].setText(info["error"])
             card["raw"].hide()
             if not info["available"]:
+                # "not installed" is wrong when the tool IS installed and
+                # something else is missing — kubectl with no cluster, say.
+                label = info.get("label") or "not installed"
                 card["status"].setText(
-                    f"<span style='color:{c['fg_muted']}'>\u25cb not "
-                    f"installed</span>")
+                    f"<span style='color:{c['fg_muted']}'>\u25cb {label}"
+                    f"</span>")
+                reason = info.get("reason") or "Install it from its page."
                 card["detail"].setText(
-                    f"<span style='color:{c['fg_muted']}'>Install it from "
-                    f"its page.</span>")
-                card["button"].setText("Install \u2192")
+                    f"<span style='color:{c['fg_muted']}'>{reason}</span>")
+                card["button"].setText(
+                    "Open \u2192" if label != "not installed"
+                    else "Install \u2192")
                 continue
             installed += 1
             card["button"].setText("Open \u2192")

@@ -307,7 +307,10 @@ KUBERNETES_TOOLS = [
 
     T("helm", "Helm", "Kubernetes",
       "Packages Kubernetes manifests into installable charts.",
-      binaries=["helm"],
+      # helm has no --version; it answers `helm version --short`, and the
+      # default guess put "Error: unknown flag: --version" in the version
+      # column of a tool that was installed and working.
+      binaries=["helm"], version_args=["version", "--short"],
       packages={"arch": "helm", "debian": "helm", "fedora": "helm",
                 "suse": "helm", "alpine": "helm"},
       windows="winget install Helm.Helm",

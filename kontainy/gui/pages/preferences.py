@@ -316,15 +316,22 @@ class PreferencesPage(Page):
             "\u2328", "Terminal",
             "Which terminal opens when you ask kontainy to run something in "
             "your own shell rather than for you.",
-            self._reset(["terminal_emulator", "terminal_arg"],
-                        "Terminal emulator and its execute flag."))
+            self._reset(["terminal_emulator", "terminal_arg",
+                         "terminal_shell"],
+                        "Terminal emulator, its execute flag and the shell "
+                        "to start."))
         self._row(grid, "Terminal emulator",
                   self._bind_combo("terminal_emulator", TERMINALS),
-                  "Auto-detect walks the usual list and takes the first one "
-                  "present.")
+                  "Auto-detect asks in this order: $TERMINAL, "
+                  "xdg-terminal-exec, the one your desktop uses, then the "
+                  "first installed.")
         self._row(grid, "Execute flag",
                   self._bind_text("terminal_arg", "-e"),
                   "Most terminals take -e; some want --  or -x instead.")
+        self._row(grid, "Shell",
+                  self._bind_text("terminal_shell", ""),
+                  "Empty is usually right: the terminal opens the shell its "
+                  "own profile says. Name one here only to override that.")
 
     def _catalogue(self):
         grid = self._section(

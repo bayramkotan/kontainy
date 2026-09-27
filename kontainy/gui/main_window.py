@@ -29,7 +29,7 @@ from ..core.registry import stats as registry_stats
 from ..rules import rule_stats
 from ..utils.config import config, log
 from ..utils.workers import stop_all_jobs
-from .pages.containers import ContainersPage
+from .pages.containers import ContainersPage, MachinesPage
 from .pages.diagnostics import DiagnosticsPage
 from .pages.overview import OverviewPage
 from .pages.learn import LearnPage
@@ -82,6 +82,7 @@ SIDEBAR = [
     (None, _platform("kubernetes")),
 
     ("VIRTUALISATION", None),
+    (None, MachinesPage),
     (None, _platform("libvirt")),
     (None, _platform("hyperv")),
     (None, _platform("vmware")),

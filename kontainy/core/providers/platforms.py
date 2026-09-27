@@ -56,6 +56,12 @@ class KubernetesProvider(Provider):
         """
         return super().available() and bool(self.targets())
 
+    def unavailable_label(self) -> str:
+        import shutil as _shutil
+        if _shutil.which("kubectl"):
+            return "no cluster configured"
+        return "not installed"
+
     def unavailable_reason(self) -> str:
         import shutil as _shutil
         where = _shutil.which("kubectl")
@@ -461,6 +467,12 @@ class _RemoteProvider(Provider):
 class IncusProvider(_RemoteProvider):
     id = "incus"
     address_noun = "Address"
+
+    def describe_command(self, target, row) -> str:
+        name = str(row.get("name", ""))
+        if not name:
+            return ""
+        return self.shown([self.binary, "info", name])
     name = "Incus"
     icon = "\U0001f9f1"
     binary = "incus"
@@ -475,6 +487,10 @@ class IncusProvider(_RemoteProvider):
 class LxdProvider(_RemoteProvider):
     id = "lxd"
     address_noun = "Address"
+
+    def describe_command(self, target, row) -> str:
+        name = str(row.get("name", ""))
+        return self.shown([self.binary, "info", name]) if name else ""
     name = "LXD"
     icon = "\U0001f4e6"
     binary = "lxc"
