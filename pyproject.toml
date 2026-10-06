@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kontainy"
-version = "0.1.4"
+version = "0.1.5"
 description = "Every Docker and Podman setting, in one interface - a desktop manager for containers, with diagnostics and built-in learning"
 # PyPI gets its own README, as VenvStudio does: the same text without
 # the logo, the screenshots and the navigation links, which need the
@@ -53,6 +53,19 @@ kty = "kontainy.__main__:main"
 # On Windows this starts the window without a console, as VenvStudio's
 # venvstudio-gui does. Elsewhere it is the same as running `ky`.
 kontainy-gui = "kontainy.__main__:gui_main"
+
+# The icon must be INSTALLED, not merely present in the repository: the
+# window title bar, the taskbar and the desktop shortcut all need to find
+# it in an installed copy. data-files resolves against the repository root
+# and installs under sys.prefix, which works for a virtual environment as
+# well as for a system install.
+#
+# WARNING: data-files cannot rename a file. The names below are the names
+# the code looks for.
+[tool.setuptools.data-files]
+"share/icons/hicolor/512x512/apps" = ["assets/icon-512.png"]
+"share/pixmaps" = ["assets/icon.png"]
+"share/kontainy" = ["assets/icon.ico", "assets/icon-1024.png"]
 
 [tool.setuptools.packages.find]
 # Discovered, never listed by hand. 0.0.4 shipped to PyPI without

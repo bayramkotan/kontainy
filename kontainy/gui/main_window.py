@@ -133,6 +133,12 @@ class MainWindow(WindowMenuMixin, QMainWindow):
         QApplication.instance().installEventFilter(self._label_policy)
 
         self._setup_window(version)
+        # The title bar, the taskbar and alt-tab all showed a generic icon
+        # because nothing ever set one — the same gap VenvStudio had.
+        from ..core.appicon import claim_taskbar_identity, set_window_icon
+        claim_taskbar_identity()
+        set_window_icon(self)
+
         self._setup_ui()
         self._setup_menubar()
         self._connect_pages()

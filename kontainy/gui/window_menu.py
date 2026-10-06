@@ -17,7 +17,7 @@ from PySide6.QtGui import QAction, QActionGroup, QDesktopServices
 from PySide6.QtWidgets import QMenu, QMessageBox
 
 from ..core.constants import APP_NAME, APP_REPO, APP_VERSION
-from ..utils.config import config, config_dir, data_dir
+from ..utils.config import config, config_dir, data_dir, log
 from .styles import THEME_OPTIONS
 
 
@@ -140,6 +140,15 @@ class WindowMenuMixin:
 
         tools_menu.addSeparator()
 
+        shortcut_action = QAction("\U0001f517 Create Desktop Shortcut", self)
+        shortcut_action.setStatusTip(
+            "An icon you can click, instead of a command you have to "
+            "remember")
+        shortcut_action.triggered.connect(self._create_shortcut)
+        tools_menu.addAction(shortcut_action)
+
+        tools_menu.addSeparator()
+
         ext_apps = QAction("\U0001f5b1 External Applications\u2026", self)
         ext_apps.setStatusTip(
             "Docker Desktop, Podman Desktop, Virtual Machine Manager, Lens, "
@@ -250,6 +259,38 @@ class WindowMenuMixin:
             QMessageBox.warning(self, "Export failed", str(exc))
             return
         self._set_status(f"Command history exported to {path}")
+
+    def _create_shortcut(self) -> None:
+        """Ask, show exactly what will be written, then write it."""
+        from PySide6.QtWidgets import QMessageBox
+        from ..core import shortcut
+
+        box = QMessageBox(self)
+        box.setWindowTitle("Create Desktop Shortcut")
+        box.setText("Create a shortcut for kontainy?")
+        box.setInformativeText(shortcut.describe())
+        box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Ok)
+        if box.exec() != QMessageBox.Ok:
+            return
+
+        try:
+            written = shortcut.create()
+        except OSError as exc:                       # noqa: BLE001
+            QMessageBox.warning(self, "Create Desktop Shortcut",
+                                f"Could not write the shortcut: {exc}")
+            return
+        if not written:
+            QMessageBox.warning(
+                self, "Create Desktop Shortcut",
+                "Nothing was written. On Windows this usually means "
+                "PowerShell refused to run; on Linux, that the desktop "
+                "directory is not writable.")
+            return
+        log().info("Shortcut written: %s", ", ".join(str(p) for p in written))
+        QMessageBox.information(
+            self, "Create Desktop Shortcut",
+            "Written:\n\n" + "\n".join(str(path) for path in written))
 
     def _open_external_apps(self) -> None:
         self.go("install")
