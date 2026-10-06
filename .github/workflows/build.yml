@@ -535,21 +535,53 @@ jobs:
           print(f"✅ all {len(source)} source modules are in the wheel")
           PY
 
-          # Only kontainy/ and its .dist-info at the top of the wheel. This
-          # check used to sit here, was pushed to the end of the next step
-          # when that step was inserted in 0.0.5, and ran there after
-          # `cd /tmp`, where there is no dist/ — failing 0.0.6's publish.
+          # Only kontainy/, its .dist-info, and the .data directory that
+          # carries the icons may sit at the top of the wheel. This check
+          # used to sit here, was pushed to the end of the next step when
+          # that step was inserted in 0.0.5, and ran there after `cd /tmp`,
+          # where there is no dist/ — failing 0.0.6's publish.
+          #
+          # The .data directory arrived in 0.1.5, when the icons became
+          # [tool.setuptools.data-files]. That is where a wheel is supposed
+          # to put files destined for sys.prefix, but this guard predated it
+          # and refused a wheel that was in fact correct, so 0.1.5 never
+          # reached PyPI. It is accepted by its exact name, built from the
+          # wheel's own filename — a stray directory that merely ends in
+          # .data is still rejected.
           python - <<'PY'
           import os, sys, zipfile
           wheel = next(f for f in os.listdir("dist") if f.endswith(".whl"))
+          dist_name, version = wheel.split("-")[:2]
+          data_dir = f"{dist_name}-{version}.data"
           names = zipfile.ZipFile(f"dist/{wheel}").namelist()
           tops = sorted({n.split("/")[0] for n in names})
           print("top-level entries:", tops)
           unexpected = [t for t in tops
-                        if t != "kontainy" and not t.endswith(".dist-info")]
+                        if t not in ("kontainy", data_dir)
+                        and not t.endswith(".dist-info")]
           if unexpected:
               sys.exit(f"::error::wheel ships unexpected top-level entries: "
                        f"{unexpected}")
+
+          # Allowing the directory is not enough: it has to hold the icons it
+          # exists for. If data-files is dropped or an asset is renamed, the
+          # wheel still builds, still installs, still opens — with a blank
+          # window icon and a desktop entry pointing at nothing. Nothing else
+          # in this job would notice, so it is asserted here by name.
+          icons = {
+              f"{data_dir}/data/share/icons/hicolor/512x512/apps/icon-512.png",
+              f"{data_dir}/data/share/pixmaps/icon.png",
+              f"{data_dir}/data/share/kontainy/icon.ico",
+              f"{data_dir}/data/share/kontainy/icon-1024.png",
+          }
+          if data_dir not in tops:
+              sys.exit("::error::the wheel has no .data directory — the icons "
+                       "in [tool.setuptools.data-files] were not packaged")
+          missing = sorted(icons - set(names))
+          if missing:
+              sys.exit(f"::error::{data_dir} is missing {len(missing)} icons: "
+                       f"{missing}")
+          print(f"✅ {data_dir} carries all {len(icons)} icons")
           PY
 
       # Install the wheel into a clean environment, away from the checkout,
