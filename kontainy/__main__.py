@@ -18,6 +18,7 @@ Usage:
     ky --scan           the context chain, every engine, systemd unit states
     ky --doctor         run every diagnostic rule and print the findings
     ky --stats          catalogue, rule and Learn counts
+    ky --shortcut       create or repair the desktop shortcut
     ky --version        print the version and exit
 """
 
@@ -134,6 +135,34 @@ def qt_missing_message(exc: Exception) -> str:
     return "\n".join(lines)
 
 
+def cli_shortcut() -> int:
+    """Create or repair the desktop shortcut, without opening the window.
+
+    ⚠️ This exists because the Tools menu cannot serve the one case that
+    matters most: the shortcut is broken, so the window cannot be opened by
+    clicking it, so the menu item that would repair it is out of reach. A
+    shortcut left behind by a virtual environment that has since been
+    deleted is exactly that case.
+    """
+    from kontainy.core import shortcut
+
+    print(shortcut.describe())
+    try:
+        written = shortcut.create()
+    except OSError as exc:
+        print(f"\nCould not write the shortcut: {exc}", file=sys.stderr)
+        return 1
+    if not written:
+        print("\nNothing was written. On Windows this usually means "
+              "PowerShell refused to run; on Linux, that the desktop "
+              "directory is not writable.", file=sys.stderr)
+        return 1
+    print()
+    for path in written:
+        print(f"  wrote {path}")
+    return 0
+
+
 def _cli(command) -> int:
     """Run a command-line mode, quietly stopping if the reader goes away.
 
@@ -171,7 +200,8 @@ def main() -> int:
     args = sys.argv[1:]
     # The original flags keep working for scripts written against 0.0.x.
     for flag, command in (("--scan", cli_scan), ("--doctor", cli_doctor),
-                          ("--stats", cli_stats)):
+                          ("--stats", cli_stats),
+                          ("--shortcut", cli_shortcut)):
         if flag in args:
             return _cli(command)
     if args:
@@ -194,6 +224,14 @@ def gui_main() -> int:
     from kontainy.core.constants import APP_NAME, APP_VERSION
     from kontainy.gui.main_window import MainWindow
     from kontainy.utils import logs
+
+    # Before Qt starts: it reports a missing platform plugin by aborting,
+    # so there is no exception to catch and explain afterwards.
+    from kontainy.core.qtcheck import preflight
+    trouble = preflight()
+    if trouble and not os.environ.get("KY_SKIP_QT_CHECK"):
+        print(trouble, file=sys.stderr)
+        return 1
 
     logs.install_qt_handler()          # Qt's warnings into kontainy's log
     import platform as _platform

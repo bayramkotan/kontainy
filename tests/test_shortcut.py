@@ -71,8 +71,116 @@ def test_the_shortcut_starts_this_interpreter():
     argv = shortcut.launcher()
     assert argv[0].endswith(("python", "python3", "python.exe",
                              "kontainy-gui", "kontainy-gui.exe")), argv
-    if argv[0] == sys.executable:
-        assert argv[1:] == ["-m", "kontainy"]
+
+
+# --- the launcher must outlive the environment ------------------------------------
+def test_a_checkout_runs_main_py_not_the_pip_wrapper(monkeypatch, tmp_path):
+    """0.1.5 wrote `.venv/bin/kontainy-gui` into the shortcut. That wrapper
+    exists only while kontainy is pip-installed into the venv, and the
+    ordinary clone-and-run flow does not put it back — so the icon died
+    with "Could not find the program" while kontainy itself still ran."""
+    checkout = tmp_path / "kontainy"
+    checkout.mkdir()
+    main_py = checkout / "main.py"
+    main_py.write_text("", encoding="utf-8")
+    (checkout / "pyproject.toml").write_text("", encoding="utf-8")
+    # The wrapper is there today — and must still not be chosen.
+    venv_bin = tmp_path / "venv"
+    venv_bin.mkdir()
+    wrapper = venv_bin / ("kontainy-gui.exe" if os.name == "nt"
+                          else "kontainy-gui")
+    wrapper.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(venv_bin / "python"))
+    monkeypatch.setattr(shortcut, "checkout_main", lambda: main_py)
+
+    assert shortcut.launcher() == [str(venv_bin / "python"), str(main_py)]
+
+
+def test_an_installed_copy_uses_the_gui_command(monkeypatch, tmp_path):
+    """There it is the right answer: it opens the window with no console
+    behind it on Windows, and it returns whenever the package does."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    name = "kontainy-gui.exe" if os.name == "nt" else "kontainy-gui"
+    (bin_dir / name).write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", str(bin_dir / "python"))
+    monkeypatch.setattr(shortcut, "checkout_main", lambda: None)
+
+    assert shortcut.launcher() == [str(bin_dir / name)]
+
+
+def test_with_neither_it_falls_back_to_the_module(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "python"))
+    monkeypatch.setattr(shortcut, "checkout_main", lambda: None)
+    monkeypatch.setattr(shortcut, "script_dirs", lambda: [tmp_path])
+    assert shortcut.launcher() == [str(tmp_path / "python"), "-m", "kontainy"]
+
+
+def test_a_user_install_finds_its_command_in_local_bin(monkeypatch, tmp_path):
+    """`pip install --user` puts the interpreter at /usr/bin/python3 and the
+    command in ~/.local/bin, so looking only beside the interpreter misses
+    it — and on Windows that costs the console-less kontainy-gui.exe."""
+    local_bin = tmp_path / ".local/bin"
+    local_bin.mkdir(parents=True)
+    name = "kontainy-gui.exe" if os.name == "nt" else "kontainy-gui"
+    (local_bin / name).write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    monkeypatch.setattr(shortcut, "checkout_main", lambda: None)
+    monkeypatch.setattr(shortcut, "script_dirs",
+                        lambda: [Path("/usr/bin"), local_bin])
+
+    assert shortcut.launcher() == [str(local_bin / name)]
+
+
+def test_the_script_directories_are_asked_of_sysconfig():
+    """Never PATH: a `kontainy` on PATH may belong to another install."""
+    dirs = shortcut.script_dirs()
+    assert Path(sys.executable).parent in dirs
+    assert len(dirs) == len(set(dirs))
+
+
+def test_this_checkout_is_recognised_as_one():
+    main_py = shortcut.checkout_main()
+    assert main_py is not None and main_py.name == "main.py"
+
+
+def test_an_installed_copy_has_no_main_py(monkeypatch, tmp_path):
+    """main.py is deliberately kept out of the wheel, so its absence is the
+    test for "am I installed"."""
+    fake = tmp_path / "a/b/c/shortcut.py"
+    fake.parent.mkdir(parents=True)
+    monkeypatch.setattr(shortcut, "__file__", str(fake))
+    assert shortcut.checkout_main() is None
+
+
+# --- nothing is written without checking first ------------------------------------
+def test_a_launcher_that_is_gone_is_refused(monkeypatch, tmp_path):
+    """The whole point: a shortcut is seen again only when it is clicked,
+    which is the worst moment to find out it is wrong."""
+    monkeypatch.setattr(shortcut, "launcher",
+                        lambda: [str(tmp_path / "python"), "-m", "kontainy"])
+    with pytest.raises(shortcut.ShortcutError) as caught:
+        shortcut.verify()
+    assert "does not exist" in str(caught.value)
+
+
+def test_a_missing_script_is_refused_too(monkeypatch, tmp_path):
+    python = tmp_path / "python"
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(shortcut, "launcher",
+                        lambda: [str(python), str(tmp_path / "main.py")])
+    with pytest.raises(shortcut.ShortcutError):
+        shortcut.verify()
+
+
+def test_the_error_is_an_oserror():
+    """window_menu catches OSError; a new exception class outside that
+    hierarchy would reach the user as a traceback."""
+    assert issubclass(shortcut.ShortcutError, OSError)
+
+
+def test_verify_passes_for_the_real_launcher():
+    shortcut.verify()
 
 
 def test_writing_puts_one_in_the_menu_and_one_on_the_desktop(monkeypatch,
@@ -128,3 +236,90 @@ def test_describe_says_what_will_be_written():
     text = shortcut.describe()
     assert "kontainy" in text
     assert any(word in text for word in (".desktop", ".lnk", ".command"))
+
+
+# --- quoting, working directory, and a stale shortcut -----------------------------
+def test_a_path_with_a_space_is_quoted():
+    """`/home/me/My Projects/kontainy/main.py` unquoted is two arguments,
+    and the shortcut fails with half a filename in the error."""
+    line = shortcut._exec_value(["/opt/py thon/bin/python",
+                                 "/home/me/My Projects/main.py"])
+    assert line == '"/opt/py thon/bin/python" "/home/me/My Projects/main.py"'
+    assert shortcut._exec_value(["/usr/bin/python", "-m", "kontainy"]) == \
+        "/usr/bin/python -m kontainy"
+
+
+def test_the_entry_names_a_working_directory():
+    """Without Path=, `-m kontainy` and every relative path in a checkout
+    resolve against whatever directory the desktop happened to use."""
+    text = shortcut.desktop_entry("kontainy")
+    path = [l for l in text.splitlines() if l.startswith("Path=")]
+    assert path and Path(path[0][len("Path="):]).is_dir()
+
+
+def test_a_stale_entry_is_reported_so_it_can_be_repaired(monkeypatch,
+                                                          tmp_path):
+    """Exactly the failure seen in 0.1.5: the file is still there, the
+    program it names is not."""
+    if os.name == "nt":
+        pytest.skip("the text formats only")
+    entry = tmp_path / "kontainy.desktop"
+    entry.write_text(
+        "[Desktop Entry]\n"
+        f"Exec={tmp_path}/.venv/bin/kontainy-gui\n", encoding="utf-8")
+    monkeypatch.setattr(shortcut, "existing", lambda: [entry])
+    assert shortcut.broken() == f"{tmp_path}/.venv/bin/kontainy-gui"
+    assert "no longer exists" in shortcut.describe()
+
+
+def test_a_working_entry_is_not_called_broken(monkeypatch, tmp_path):
+    if os.name == "nt":
+        pytest.skip("the text formats only")
+    program = tmp_path / "python"
+    program.write_text("", encoding="utf-8")
+    entry = tmp_path / "kontainy.desktop"
+    entry.write_text(f"[Desktop Entry]\nExec={program} -m kontainy\n",
+                     encoding="utf-8")
+    monkeypatch.setattr(shortcut, "existing", lambda: [entry])
+    assert shortcut.broken() == ""
+
+
+def test_the_shortcut_can_be_repaired_without_the_window(monkeypatch,
+                                                          tmp_path):
+    """The case the Tools menu cannot serve: the shortcut is broken, so the
+    window cannot be opened by clicking it, so the menu item that would
+    repair it is out of reach."""
+    from kontainy import __main__ as entry
+
+    written = [tmp_path / "kontainy.desktop"]
+    monkeypatch.setattr(shortcut, "create", lambda both=True: written)
+    assert entry.cli_shortcut() == 0
+
+
+def test_a_failure_to_write_is_reported_not_raised(monkeypatch, tmp_path):
+    from kontainy import __main__ as entry
+
+    def refuse(both=True):
+        raise shortcut.ShortcutError("no such program")
+
+    monkeypatch.setattr(shortcut, "create", refuse)
+    assert entry.cli_shortcut() == 1
+
+
+def test_shortcut_is_a_command_of_its_own():
+    """`ky shortcut`, beside scan/doctor/stats, and `ky --shortcut` for the
+    flag style the older releases used."""
+    from kontainy import cli
+
+    parser = cli.build_parser()
+    assert parser.parse_args(["shortcut"]).command == "shortcut"
+
+
+def test_broken_survives_an_entry_it_cannot_parse(monkeypatch, tmp_path):
+    if os.name == "nt":
+        pytest.skip("the text formats only")
+    entry = tmp_path / "kontainy.desktop"
+    entry.write_text('[Desktop Entry]\nExec="unclosed quote\n',
+                     encoding="utf-8")
+    monkeypatch.setattr(shortcut, "existing", lambda: [entry])
+    assert shortcut.broken() == ""
