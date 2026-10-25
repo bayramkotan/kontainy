@@ -15,6 +15,19 @@ import pytest
 from kontainy.core import appicon, shortcut
 
 
+@pytest.fixture(autouse=True)
+def no_real_path(monkeypatch, tmp_path_factory):
+    """PATH is the developer's machine, and these tests are about a rule.
+
+    launcher() reads PATH when it looks for an installed command outside
+    the checkout. Left alone, these tests passed on a machine with no
+    kontainy installed and failed on Bayram's, where /usr/bin/kontainy-gui
+    exists and is the correct answer for the real system and the wrong one
+    for a fixture. Every test here that wants a PATH sets its own.
+    """
+    monkeypatch.setenv("PATH", str(tmp_path_factory.mktemp("empty-path")))
+
+
 # --- the icon -------------------------------------------------------------------
 def test_an_icon_is_found_in_the_checkout():
     found = appicon.find_icon(".png")
@@ -144,8 +157,12 @@ def test_a_checkout_runs_main_py_not_the_pip_wrapper(monkeypatch, tmp_path):
     wrapper.write_text("", encoding="utf-8")
     python = tmp_path / "usr/bin"
     python.mkdir(parents=True)
-    (python / "python3").write_text("", encoding="utf-8")
-    (python / "python3").chmod(0o755)
+    # shutil.which finds a name on Windows only with an extension PATHEXT
+    # lists, so a fake called "python3" there is invisible and the test
+    # measures the fallback instead of the rule.
+    interpreter = python / ("python3.exe" if os.name == "nt" else "python3")
+    interpreter.write_text("", encoding="utf-8")
+    interpreter.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(venv_bin / "python"))
     monkeypatch.setattr(shortcut, "checkout_main", lambda: main_py)
     monkeypatch.setattr(shortcut, "script_dirs", lambda: [venv_bin])
@@ -153,7 +170,7 @@ def test_a_checkout_runs_main_py_not_the_pip_wrapper(monkeypatch, tmp_path):
 
     # No install outside the checkout, so main.py — started by an
     # interpreter that is not inside the disposable .venv either.
-    assert shortcut.launcher() == [str(python / "python3"), str(main_py)]
+    assert shortcut.launcher() == [str(interpreter), str(main_py)]
 
 
 def test_an_installed_copy_uses_the_gui_command(monkeypatch, tmp_path):
@@ -184,10 +201,16 @@ def test_a_user_install_finds_its_command_in_local_bin(monkeypatch, tmp_path):
     local_bin.mkdir(parents=True)
     name = "kontainy-gui.exe" if os.name == "nt" else "kontainy-gui"
     (local_bin / name).write_text("", encoding="utf-8")
-    monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
+    # Stands in for /usr/bin, and must not BE /usr/bin: a machine with
+    # kontainy installed system-wide has the real command there, and the
+    # test would then pass or fail on what the developer happens to have
+    # rather than on the rule.
+    system_bin = tmp_path / "usr/bin"
+    system_bin.mkdir(parents=True)
+    monkeypatch.setattr(sys, "executable", str(system_bin / "python3"))
     monkeypatch.setattr(shortcut, "checkout_main", lambda: None)
     monkeypatch.setattr(shortcut, "script_dirs",
-                        lambda: [Path("/usr/bin"), local_bin])
+                        lambda: [system_bin, local_bin])
 
     assert shortcut.launcher() == [str(local_bin / name)]
 
