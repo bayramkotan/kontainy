@@ -810,6 +810,43 @@ def cmd_overview(args) -> int:
     return 0
 
 
+def cmd_stock(args, kind: str) -> int:
+    """`ky images` / `ky volumes` — every engine, every context, one table.
+
+    The Used by column is the reason this exists on the command line too:
+    a prune script that cannot see who holds a volume is how data is lost
+    from a cron job rather than from a click.
+    """
+    from .core import inventory
+    rows = (inventory.list_images() if kind == "images"
+            else inventory.list_volumes())
+    if getattr(args, "unused", False):
+        rows = [r for r in rows if not r.get("used_by")]
+    for row in rows:
+        row["used"] = ", ".join(row.get("used_by") or []) or "-"
+    if kind == "images":
+        columns = [("engine", "Engine"), ("target", "Context"),
+                   ("repository", "Repository"), ("tag", "Tag"),
+                   ("id", "Image ID"), ("size", "Size"), ("used", "Used by")]
+    else:
+        columns = [("engine", "Engine"), ("target", "Context"),
+                   ("name", "Name"), ("driver", "Driver"),
+                   ("mountpoint", "Mountpoint"), ("size", "Size"),
+                   ("used", "Used by")]
+    if Out.json:
+        print(json.dumps(rows, indent=2, default=str))
+        return 0
+    _print_table(rows, columns)
+    if not Out.quiet and rows:
+        free = sum(1 for r in rows if r.get("used") == "-")
+        noun = "image" if kind == "images" else "volume"
+        print()
+        print(f"{len(rows)} {noun}s, {free} held by nothing. "
+              f"\"Used by -\" means no container has it open now \u2014 "
+              f"not that it is empty.")
+    return 0
+
+
 def cmd_techs(args) -> int:
     rows = []
     for p in _providers_here():
@@ -962,6 +999,14 @@ def build_parser() -> argparse.ArgumentParser:
     # Upgrades the installation that is running, not whatever pip means on
     # PATH — which may be a different environment entirely.
     sub.add_parser("update", help="install a newer release if there is one")
+    # Images and volumes are per engine AND per context, so they are listed
+    # the way containers are: every source at once, each row saying where
+    # it came from.
+    for name, what in (("images", "images"), ("volumes", "volumes")):
+        p = sub.add_parser(name, help=f"every engine's {what}, with what "
+                                      f"is holding each one")
+        p.add_argument("--unused", action="store_true",
+                       help="only the ones no container is holding")
 
     p = sub.add_parser("tools", help="installable tools and their state")
     p.add_argument("--group", default="")
@@ -1053,6 +1098,8 @@ def main(argv=None) -> int:
                 "stats": entry.cli_stats,
                 "shortcut": entry.cli_shortcut,
                 "update": entry.cli_update}[command]()
+    if command in ("images", "volumes"):
+        return cmd_stock(args, command)
     if command == "host":
         return cmd_host(args)
     if command == "report":

@@ -30,6 +30,7 @@ from ..rules import rule_stats
 from ..utils.config import config, log
 from ..utils.workers import stop_all_jobs
 from .pages.containers import ContainersPage, MachinesPage
+from .pages.inventory import ImagesPage, VolumesPage
 from .pages.diagnostics import DiagnosticsPage
 from .pages.overview import OverviewPage
 from .pages.learn import LearnPage
@@ -77,6 +78,8 @@ SIDEBAR = [
     (None, _platform("docker")),
     (None, _platform("podman")),
     (None, ContainersPage),
+    (None, ImagesPage),
+    (None, VolumesPage),
 
     ("ORCHESTRATION", None),
     (None, _platform("kubernetes")),
