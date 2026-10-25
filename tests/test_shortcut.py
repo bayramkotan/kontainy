@@ -170,7 +170,14 @@ def test_a_checkout_runs_main_py_not_the_pip_wrapper(monkeypatch, tmp_path):
 
     # No install outside the checkout, so main.py — started by an
     # interpreter that is not inside the disposable .venv either.
-    assert shortcut.launcher() == [str(interpreter), str(main_py)]
+    #
+    # Compared as paths, not as strings: shutil.which appends the suffix
+    # exactly as PATHEXT spells it, so a file created as python3.exe comes
+    # back as python3.EXE. The two name one file, and only a string
+    # comparison disagrees — which is what pathlib's case-insensitive
+    # equality on Windows is for.
+    argv = shortcut.launcher()
+    assert [Path(part) for part in argv] == [interpreter, main_py]
 
 
 def test_an_installed_copy_uses_the_gui_command(monkeypatch, tmp_path):
