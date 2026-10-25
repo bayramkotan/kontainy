@@ -51,6 +51,16 @@ def _section_verbs(section) -> set:
     return verbs
 
 
+def _top_level() -> set:
+    """Every subcommand the parser accepts, straight from the parser."""
+    import argparse
+    names = set()
+    for action in cli.build_parser()._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            names.update(action.choices)
+    return names
+
+
 def test_the_readme_has_a_cli_table():
     assert len(_cli_rows()) > 20
 
@@ -62,9 +72,10 @@ def test_every_documented_command_exists(command):
     if not words:
         return
     head = words[0]
-    top = {"overview", "tech", "tools", "install", "uninstall", "catalog",
-           "doctor", "scan", "stats", "wsl", "version", "gui"}
-    if head in top or head.upper() == head:      # TECH placeholder
+    # Asked of the parser, never listed by hand: a hand-written list goes
+    # stale the moment a command is added, and then it is this guard that
+    # fails rather than anything being wrong with the README.
+    if head in _top_level() or head.upper() == head:   # TECH placeholder
         return
     assert head in cli.TECH_ALIASES, f"unknown command {head!r} in README"
     provider = next(p for p in PROVIDERS if p.id == cli.TECH_ALIASES[head])

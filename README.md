@@ -608,6 +608,8 @@ Installing gives you the same tool under three names: **`ky`** to type,
 | `ky catalog --search dns` | `kontainy catalog --search dns` | Search the 152 keys |
 | `ky doctor` | `kontainy doctor` | Run every diagnostic rule |
 | `ky scan` | `kontainy scan` | The context chain and every engine found |
+| `ky update` | `kontainy update` | Install a newer release — into the copy that is running, never whatever `pip` means on PATH |
+| `ky shortcut` | `kontainy shortcut` | Create or repair the desktop shortcut, without opening the window |
 | `ky wsl` · `ky wsl use NAME` | `kontainy wsl …` | *(Windows)* Which WSL distribution carries the Linux tools |
 | `ky -V` | `kontainy -V` | Show the version (also `version`) |
 | `ky -h` | `kontainy -h` | Show help |

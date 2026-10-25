@@ -331,14 +331,58 @@ class WindowMenuMixin:
                 f"<p>\u2705 You are running the latest version: "
                 f"<b>v{APP_VERSION}</b>.</p>")
             return
-        answer = QMessageBox.question(
-            self, "Check for Updates",
-            f"<p><b>kontainy v{result['latest']}</b> is available. "
-            f"You have <b>v{APP_VERSION}</b>.</p>"
-            f"<p>Upgrade with:<br><code>{upgrade_command()}</code></p>"
-            f"<p>On Linux, a system-wide install also needs "
-            f"<code>--break-system-packages</code>.</p>"
-            f"<p>Open the project page?</p>",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-        if answer == QMessageBox.Yes:
+        box = QMessageBox(self)
+        box.setWindowTitle("Check for Updates")
+        box.setText(f"<p><b>kontainy v{result['latest']}</b> is available. "
+                    f"You have <b>v{APP_VERSION}</b>.</p>"
+                    f"<p>It will be installed with:<br>"
+                    f"<code>{upgrade_command()}</code></p>")
+        # The command is shown, not hidden behind the button: it names the
+        # installation that will change, and on a system-wide install it
+        # starts with sudo, which is not something to run unannounced.
+        install = box.addButton("Install now", QMessageBox.AcceptRole)
+        page = box.addButton("Project page", QMessageBox.ActionRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is page:
             QDesktopServices.openUrl(QUrl(result.get("url") or PROJECT_PAGE))
+            return
+        if box.clickedButton() is install:
+            self._install_update(result.get("latest", ""))
+
+    def _install_update(self, latest: str) -> None:
+        """Run the upgrade in a worker, then say what has to happen next.
+
+        kontainy cannot replace the code it is executing, so the new version
+        takes effect on the next start. Saying so is the difference between
+        "it did nothing" and "it worked".
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from ..core.updater import perform_upgrade
+        from ..utils.workers import CallableJob, run_job
+
+        self.statusBar().showMessage(f"Installing kontainy {latest}…")
+
+        def done(outcome) -> None:
+            ok, output = outcome
+            self.statusBar().clearMessage()
+            if not ok:
+                QMessageBox.warning(self, "Check for Updates",
+                                    f"<p>The upgrade did not finish.</p>"
+                                    f"<pre>{output[-2000:]}</pre>")
+                return
+            from ..core import shortcut
+            stale = shortcut.broken()
+            if stale:
+                try:
+                    shortcut.create()
+                except OSError:
+                    pass
+            QMessageBox.information(
+                self, "Check for Updates",
+                f"<p>✅ kontainy <b>{latest}</b> is installed.</p>"
+                f"<p>Close and reopen kontainy to run it — a program cannot "
+                f"replace the code it is executing.</p>")
+
+        run_job(CallableJob(perform_upgrade), done,
+                lambda message: done((False, message)))

@@ -959,6 +959,9 @@ def build_parser() -> argparse.ArgumentParser:
     # Needed from the command line precisely when the window cannot be
     # opened by clicking, which is when the Tools menu is out of reach.
     sub.add_parser("shortcut", help="create or repair the desktop shortcut")
+    # Upgrades the installation that is running, not whatever pip means on
+    # PATH — which may be a different environment entirely.
+    sub.add_parser("update", help="install a newer release if there is one")
 
     p = sub.add_parser("tools", help="installable tools and their state")
     p.add_argument("--group", default="")
@@ -1044,11 +1047,12 @@ def main(argv=None) -> int:
         return cmd_overview(args)
     if command == "tech":
         return cmd_techs(args)
-    if command in ("doctor", "scan", "stats", "shortcut"):
+    if command in ("doctor", "scan", "stats", "shortcut", "update"):
         from . import __main__ as entry
         return {"doctor": entry.cli_doctor, "scan": entry.cli_scan,
                 "stats": entry.cli_stats,
-                "shortcut": entry.cli_shortcut}[command]()
+                "shortcut": entry.cli_shortcut,
+                "update": entry.cli_update}[command]()
     if command == "host":
         return cmd_host(args)
     if command == "report":

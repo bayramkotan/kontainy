@@ -19,6 +19,7 @@ Usage:
     ky --doctor         run every diagnostic rule and print the findings
     ky --stats          catalogue, rule and Learn counts
     ky --shortcut       create or repair the desktop shortcut
+    ky --update         install a newer release if there is one
     ky --version        print the version and exit
 """
 
@@ -135,6 +136,45 @@ def qt_missing_message(exc: Exception) -> str:
     return "\n".join(lines)
 
 
+def cli_update() -> int:
+    """Check PyPI and, if there is a newer release, install it.
+
+    The upgrade goes to the installation that is running, never to whatever
+    `pip` means on PATH — see kontainy.core.updater. Afterwards the desktop
+    shortcut is repaired if the upgrade moved what it points at, because an
+    upgrade that leaves a dead icon behind has not finished.
+    """
+    from kontainy.core import shortcut, updater
+
+    state = updater.check_for_update()
+    print(f"installed : {state['current']}  ({updater.install_kind()})")
+    if state["error"]:
+        print(f"PyPI      : could not be reached — {state['error']}")
+        return 1
+    print(f"on PyPI   : {state['latest']}")
+    if not state["update_available"]:
+        print("\nkontainy is up to date.")
+        return 0
+
+    print(f"\nUpgrading with: {updater.upgrade_command()}\n")
+    ok, output = updater.perform_upgrade()
+    if output:
+        print(output)
+    if not ok:
+        return 1
+    print(f"\nkontainy {state['latest']} is installed.")
+
+    stale = shortcut.broken()
+    if stale:
+        try:
+            shortcut.create()
+            print(f"The desktop shortcut pointed at {stale}; repaired.")
+        except OSError as exc:
+            print(f"The desktop shortcut points at {stale} and could not be "
+                  f"repaired: {exc}")
+    return 0
+
+
 def cli_shortcut() -> int:
     """Create or repair the desktop shortcut, without opening the window.
 
@@ -201,7 +241,8 @@ def main() -> int:
     # The original flags keep working for scripts written against 0.0.x.
     for flag, command in (("--scan", cli_scan), ("--doctor", cli_doctor),
                           ("--stats", cli_stats),
-                          ("--shortcut", cli_shortcut)):
+                          ("--shortcut", cli_shortcut),
+                          ("--update", cli_update)):
         if flag in args:
             return _cli(command)
     if args:

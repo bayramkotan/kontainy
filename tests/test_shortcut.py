@@ -74,26 +74,86 @@ def test_the_shortcut_starts_this_interpreter():
 
 
 # --- the launcher must outlive the environment ------------------------------------
+def test_an_installed_copy_beats_the_checkouts_venv(monkeypatch, tmp_path):
+    """The one that was breaking it. kontainy was installed system-wide and
+    working, and the icon still pointed at <repo>/.venv/bin/kontainy-gui —
+    which a cache clear or a venv rebuild deletes. The shortcut must take
+    the install that outlives the working tree."""
+    checkout = tmp_path / "Github/kontainy"
+    (checkout / ".venv/bin").mkdir(parents=True)
+    main_py = checkout / "main.py"
+    main_py.write_text("", encoding="utf-8")
+    (checkout / "pyproject.toml").write_text("", encoding="utf-8")
+    name = "kontainy-gui.exe" if os.name == "nt" else "kontainy-gui"
+    (checkout / ".venv/bin" / name).write_text("", encoding="utf-8")
+    system = tmp_path / "usr/bin"
+    system.mkdir(parents=True)
+    (system / name).write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "executable", str(checkout / ".venv/bin/python"))
+    monkeypatch.setattr(shortcut, "checkout_main", lambda: main_py)
+    monkeypatch.setattr(shortcut, "script_dirs",
+                        lambda: [checkout / ".venv/bin", system])
+
+    assert shortcut.launcher() == [str(system / name)]
+
+
+def test_nothing_under_the_checkout_is_ever_chosen(monkeypatch, tmp_path):
+    """Including from PATH, which an activated venv puts first."""
+    checkout = tmp_path / "kontainy"
+    (checkout / ".venv/bin").mkdir(parents=True)
+    name = "kontainy-gui.exe" if os.name == "nt" else "kontainy-gui"
+    (checkout / ".venv/bin" / name).write_text("", encoding="utf-8")
+    main_py = checkout / "main.py"
+    main_py.write_text("", encoding="utf-8")
+    monkeypatch.setattr(shortcut, "checkout_main", lambda: main_py)
+    monkeypatch.setattr(shortcut, "script_dirs",
+                        lambda: [checkout / ".venv/bin"])
+    monkeypatch.setenv("PATH", str(checkout / ".venv/bin"))
+
+    assert shortcut.durable_command() is None
+
+
+def test_the_working_directory_leaves_the_checkout_with_it(monkeypatch,
+                                                            tmp_path):
+    """Path= must not name a directory that disappears with the checkout
+    when the shortcut no longer starts anything in it."""
+    installed = tmp_path / "bin/kontainy-gui"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("", encoding="utf-8")
+    monkeypatch.setattr(shortcut, "launcher", lambda: [str(installed)])
+    monkeypatch.setattr(shortcut, "checkout_main",
+                        lambda: tmp_path / "repo/main.py")
+    assert shortcut.working_dir() == Path.home()
+
+
 def test_a_checkout_runs_main_py_not_the_pip_wrapper(monkeypatch, tmp_path):
     """0.1.5 wrote `.venv/bin/kontainy-gui` into the shortcut. That wrapper
     exists only while kontainy is pip-installed into the venv, and the
     ordinary clone-and-run flow does not put it back — so the icon died
     with "Could not find the program" while kontainy itself still ran."""
     checkout = tmp_path / "kontainy"
-    checkout.mkdir()
+    venv_bin = checkout / ".venv/bin"
+    venv_bin.mkdir(parents=True)
     main_py = checkout / "main.py"
     main_py.write_text("", encoding="utf-8")
     (checkout / "pyproject.toml").write_text("", encoding="utf-8")
     # The wrapper is there today — and must still not be chosen.
-    venv_bin = tmp_path / "venv"
-    venv_bin.mkdir()
     wrapper = venv_bin / ("kontainy-gui.exe" if os.name == "nt"
                           else "kontainy-gui")
     wrapper.write_text("", encoding="utf-8")
+    python = tmp_path / "usr/bin"
+    python.mkdir(parents=True)
+    (python / "python3").write_text("", encoding="utf-8")
+    (python / "python3").chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(venv_bin / "python"))
     monkeypatch.setattr(shortcut, "checkout_main", lambda: main_py)
+    monkeypatch.setattr(shortcut, "script_dirs", lambda: [venv_bin])
+    monkeypatch.setenv("PATH", str(python))
 
-    assert shortcut.launcher() == [str(venv_bin / "python"), str(main_py)]
+    # No install outside the checkout, so main.py — started by an
+    # interpreter that is not inside the disposable .venv either.
+    assert shortcut.launcher() == [str(python / "python3"), str(main_py)]
 
 
 def test_an_installed_copy_uses_the_gui_command(monkeypatch, tmp_path):

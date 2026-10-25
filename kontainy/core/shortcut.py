@@ -102,38 +102,97 @@ def script_dirs() -> list:
     return found
 
 
-def launcher() -> list:
-    """The command the shortcut runs.
+def _under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
 
-    The interpreter running right now, not a name on PATH: the shortcut of
-    a kontainy installed in one environment must not start another one.
 
-    In a checkout this runs `main.py`, which outlives the environment. Only
-    an installed copy uses the `kontainy-gui` wrapper — and there it is the
-    right answer, because on Windows it opens the window with no console
-    behind it, and it comes back whenever the package does.
+def _path_dirs() -> list:
+    return [Path(p) for p in (os.environ.get("PATH") or "").split(os.pathsep)
+            if p]
+
+
+def durable_command() -> Path | None:
+    """An installed kontainy command that does not live in the checkout.
+
+    ⚠️ This is the one the shortcut wants. A command under the checkout is
+    almost always `<repo>/.venv/bin/kontainy-gui`, and that path is
+    disposable by design: the venv is rebuilt, cleared with a cache, or
+    deleted outright, and the icon dies with it — even though kontainy is
+    installed system-wide and working. "pip ile kurduk, yine de .venv'e
+    bağımlı" was exactly this.
     """
+    root = checkout_main()
+    root = root.parent if root is not None else None
+    names = (("kontainy-gui.exe", "kontainy.exe") if os.name == "nt"
+             else ("kontainy-gui", "kontainy"))
+    for directory in script_dirs() + _path_dirs():
+        for name in names:
+            candidate = directory / name
+            if not candidate.is_file():
+                continue
+            if root is not None and _under(candidate, root):
+                continue
+            return candidate
+    return None
+
+
+def durable_python() -> str:
+    """An interpreter that is not inside the checkout.
+
+    `main.py` sets its own environment up, so any interpreter can start it —
+    and one from outside survives the checkout's .venv being deleted.
+    """
+    root = checkout_main()
+    if root is None or not _under(Path(sys.executable), root.parent):
+        return sys.executable
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if found and not _under(Path(found), root.parent):
+            return found
+    return sys.executable
+
+
+def launcher() -> list:
+    """The command the shortcut runs, most durable first.
+
+    1. An installed command outside the checkout — a system, user or pipx
+       install. This is what a pip-installed kontainy should start, and it
+       outlives anything in the working tree.
+    2. The checkout's `main.py`, started by an interpreter from outside the
+       checkout where there is one. main.py is in git and builds its own
+       environment, so it survives a deleted .venv.
+    3. `python -m kontainy`.
+
+    PATH is consulted only at step 1, and only after the checkout's own
+    directory has been ruled out, so it can never pick the disposable copy.
+    """
+    command = durable_command()
+    if command is not None:
+        return [str(command)]
+
     main_py = checkout_main()
     if main_py is not None:
-        return [sys.executable, str(main_py)]
-
-    name = "kontainy-gui.exe" if os.name == "nt" else "kontainy-gui"
-    for directory in script_dirs():
-        gui = directory / name
-        if gui.is_file():
-            return [str(gui)]
+        return [durable_python(), str(main_py)]
     return [sys.executable, "-m", "kontainy"]
 
 
 def working_dir() -> Path:
     """Where the shortcut starts.
 
-    The checkout, so `python -m kontainy` and every relative path in it
-    resolve; the home directory otherwise, which is where a file dialog
-    should open.
+    The checkout only when the shortcut actually starts main.py, so that
+    every relative path in it resolves. An installed command starts in the
+    home directory, which is where a file dialog should open — and which
+    still exists when the checkout does not.
     """
+    argv = launcher()
     main_py = checkout_main()
-    return main_py.parent if main_py is not None else Path.home()
+    if main_py is not None and str(main_py) in argv:
+        return main_py.parent
+    return Path.home()
 
 
 def verify(argv: list | None = None) -> None:
