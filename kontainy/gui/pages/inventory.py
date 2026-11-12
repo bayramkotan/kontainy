@@ -56,6 +56,8 @@ class StockPage(Page):
     def build(self) -> None:
         self.rows = []
         self.filtered = []
+        self.visited = []
+        self.problems = []
         self.build_tools()
 
         self.refresh_btn = self.add_tool_button("\U0001f504  Refresh",
@@ -132,21 +134,31 @@ class StockPage(Page):
         self.busy.emit(False)
         self.status.emit(f"Listing failed: {message}")
 
-    def _fill(self, rows) -> None:
-        self.rows = rows
+    def _fill(self, stock) -> None:
+        self.rows = list(stock.rows)
+        self.visited = list(stock.sources)
+        self.problems = list(stock.problems)
         self.refresh_btn.setEnabled(True)
         self.busy.emit(False)
         self._fill_sources()
         self._apply_filter()
-        log().info("%s: %d from %d source(s)", self.TITLE, len(rows),
-                   len(self._sources()))
+        log().info("%s: %d from %d source(s), %d unreachable", self.TITLE,
+                   len(self.rows), len(self.visited), len(self.problems))
+        if self.problems and not self.rows:
+            where, why = self.problems[0]
+            self.status.emit(f"{where}: {why}")
 
     def _sources(self) -> list:
-        seen = {}
-        for row in self.rows:
-            seen.setdefault((row["engine_id"], row["target"]),
-                            (row["engine"], row["active"], row["kind"]))
-        return list(seen.items())
+        """Every source that was ASKED, not every source that answered.
+
+        Counting them from the rows makes an engine that answered and holds
+        nothing vanish from the dropdown, and the page then reports "0 from
+        0 sources" — which reads as "nothing answered" when the truth is
+        "nothing stored". An empty Docker is not an absent Docker.
+        """
+        return [((engine_id, target), (engine, active, kind))
+                for engine_id, engine, target, kind, active
+                in getattr(self, "visited", [])]
 
     def _fill_sources(self) -> None:
         current = self.source.currentData()
@@ -184,10 +196,18 @@ class StockPage(Page):
             r = self.table.rowCount()
             self.table.insertRow(r)
             users = row.get("used_by") or []
-            held = f"{len(users)} · {', '.join(users[:2])}" if users \
-                else "—"
-            if len(users) > 2:
-                held += f" +{len(users) - 2}"
+            known = row.get("usage_known", True)
+            if users:
+                held = f"{len(users)} · {', '.join(users[:2])}"
+                if len(users) > 2:
+                    held += f" +{len(users) - 2}"
+            elif not known:
+                # ⚠️ Not "nothing holds it" — "we could not find out". The
+                # two look identical and only one of them is safe to act
+                # on, so they must never print the same character.
+                held = "?"
+            else:
+                held = "—"
             cells = ([row["engine"],
                       row["target"] + (" ●" if row["active"] else "")]
                      + [str(row.get(key, "")) for _, key in self.COLUMNS]
@@ -195,18 +215,28 @@ class StockPage(Page):
             for col, value in enumerate(cells):
                 item = QTableWidgetItem(value)
                 if col == len(cells) - 1:
-                    item.setForeground(QColor(HELD if users else FREE))
+                    item.setForeground(QColor(FREE if (not users and known)
+                                              else HELD))
                 self.table.setItem(r, col, item)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(
             self.STRETCH, QHeaderView.Stretch)
 
-        free = sum(1 for r in self.filtered if not r.get("used_by"))
+        # Only rows whose holders were actually read can be called unused.
+        free = sum(1 for r in self.filtered
+                   if not r.get("used_by") and r.get("usage_known", True))
+        blind = sum(1 for r in self.filtered
+                    if not r.get("usage_known", True))
         sources = len(self._sources())
-        self.count_label.setText(
-            f"{len(self.filtered)}/{len(self.rows)} {self.NOUN} · "
-            f"{free} unused · {sources} "
-            f"source{'s' if sources != 1 else ''}")
+        text_ = (f"{len(self.filtered)}/{len(self.rows)} {self.NOUN} · "
+                 f"{free} unused · {sources} "
+                 f"source{'s' if sources != 1 else ''}")
+        if blind:
+            text_ += f" · ⚠ {blind} unknown"
+        trouble = len(getattr(self, "problems", []))
+        if trouble:
+            text_ += f" · ⚠ {trouble} unreachable"
+        self.count_label.setText(text_)
         if self.filtered:
             self.table.selectRow(0)
 
@@ -246,6 +276,14 @@ class StockPage(Page):
                 f"refusal is a safety net, not an obstacle — it is the "
                 f"only thing standing between a typo and a lost "
                 f"{self.SINGULAR}.</p>")
+        elif not item.get("usage_known", True):
+            self.tab_users.setHtml(
+                f"<p>\u26a0 <b>Unknown.</b> The container list on this "
+                f"source could not be read, so kontainy does not know "
+                f"whether anything is using this {self.SINGULAR}.</p>"
+                f"<p>An empty Used by column here means "
+                f"<i>not found out</i>, never <i>free</i>. Prune is "
+                f"switched off for this source for the same reason.</p>")
         else:
             self.tab_users.setHtml(
                 f"<p>Nothing is holding this {self.SINGULAR} right now.</p>"
@@ -464,8 +502,13 @@ class ImagesPage(StockPage):
             return
         built = inventory.prune_images_action(provider, target, rows)
         if built is None:
+            unknown = any(not r.get("usage_known", True) for r in rows)
             QMessageBox.information(
                 self, "Nothing to remove",
+                "The container list on this source could not be read, so "
+                "kontainy cannot tell which images are unused. Removing "
+                "them by guess is not something it will offer."
+                if unknown else
                 "Every image on this source is held by a container.")
             return
         self._run(provider.prepare(built))
@@ -581,8 +624,13 @@ class VolumesPage(StockPage):
             return
         built = inventory.prune_volumes_action(provider, target, rows)
         if built is None:
+            unknown = any(not r.get("usage_known", True) for r in rows)
             QMessageBox.information(
                 self, "Nothing to remove",
+                "The container list on this source could not be read, so "
+                "kontainy cannot tell which volumes are unused \u2014 and "
+                "guessing here is how a database is deleted."
+                if unknown else
                 "Every volume on this source is held by a container.")
             return
         self._run(provider.prepare(built))

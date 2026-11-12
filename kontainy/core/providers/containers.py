@@ -293,11 +293,24 @@ from ..elevate import run as _run
 
 
 def _conn_args(provider, target) -> list:
+    """The flag that aims one command at one target.
+
+    ⚠️ The ONE place this rule may live. "(local)" is not a podman
+    connection — it is the name this page gives to "no connection selected"
+    — so passing it produces `read cli flags: connection "(local)" not
+    found`. A second copy of this function in core/inventory.py made
+    exactly that mistake, and the Images page failed on every machine
+    where podman has no connection configured, which is most of them.
+    """
     if provider.id == "docker" and target:
         return ["--context", target.name]
     if provider.id == "podman" and target and target.name != "(local)":
         return ["--connection", target.name]
     return []
+
+
+#: The public name. core/inventory.py uses this rather than its own copy.
+connection_args = _conn_args
 
 
 def _is_running(row: dict) -> bool:

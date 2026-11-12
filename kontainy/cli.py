@@ -818,8 +818,9 @@ def cmd_stock(args, kind: str) -> int:
     from a cron job rather than from a click.
     """
     from .core import inventory
-    rows = (inventory.list_images() if kind == "images"
-            else inventory.list_volumes())
+    stock = (inventory.list_images() if kind == "images"
+             else inventory.list_volumes())
+    rows = list(stock.rows)
     if getattr(args, "unused", False):
         rows = [r for r in rows if not r.get("used_by")]
     for row in rows:
@@ -837,13 +838,19 @@ def cmd_stock(args, kind: str) -> int:
         print(json.dumps(rows, indent=2, default=str))
         return 0
     _print_table(rows, columns)
-    if not Out.quiet and rows:
+    if not Out.quiet:
         free = sum(1 for r in rows if r.get("used") == "-")
         noun = "image" if kind == "images" else "volume"
         print()
-        print(f"{len(rows)} {noun}s, {free} held by nothing. "
-              f"\"Used by -\" means no container has it open now \u2014 "
-              f"not that it is empty.")
+        if rows:
+            print(f"{len(rows)} {noun}s, {free} held by nothing. "
+                  f"\"Used by -\" means no container has it open now "
+                  f"\u2014 not that it is empty.")
+        # An engine that answered and holds nothing is not an engine that
+        # failed, and the two must not print the same thing.
+        print(f"Asked {len(stock.sources)} source(s).")
+        for where, why in stock.problems:
+            print(f"  \u26a0 {where}: {why}", file=sys.stderr)
     return 0
 
 

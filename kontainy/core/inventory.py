@@ -59,6 +59,11 @@ class Source:
     kind: str = ""
     active: bool = False
     containers: list = field(default_factory=list)
+    #: False when the container listing failed. ⚠️ The difference between
+    #: "nothing is holding this volume" and "we could not find out" is the
+    #: difference between a safe deletion and a lost database, so it is
+    #: carried rather than assumed.
+    usage_known: bool = True
 
 
 def sources(engine_ids=ENGINES) -> list:
@@ -84,12 +89,17 @@ def _run(provider, argv, timeout=20.0):
 
 
 def conn(provider, target) -> list:
-    """The flag that aims a command at one target, in that tool's words."""
-    if provider.id == "docker":
-        return ["--context", target.name] if target else []
-    if provider.id == "podman":
-        return ["--connection", target.name] if target else []
-    return []
+    """The flag that aims a command at one target, in that tool's words.
+
+    ⚠️ Asked of the containers provider, never reimplemented. This module
+    had its own copy and it was wrong: podman's "(local)" target is the
+    name the page gives to "no connection selected", not a connection, so
+    `--connection (local)` fails with `read cli flags: connection
+    "(local)" not found` — and that is most machines, because a local
+    podman needs no connection at all.
+    """
+    from .providers.containers import connection_args
+    return connection_args(provider, target)
 
 
 def _argv(source, rest: list) -> list:
@@ -106,11 +116,24 @@ def containers_on(source) -> list:
     page that asked per image, or per volume, would run hundreds of
     commands to learn what two already say.
     """
-    if source.engine_id in DOCKER_LIKE:
+    if source.engine_id == "docker":
         ok, text = _run(source.provider,
                         _argv(source, ["ps", "-a", "--format", "{{json .}}"]))
+        source.usage_known = ok
         return json_lines(text) if ok else []
+    if source.engine_id == "podman":
+        # ⚠️ Podman prints a JSON ARRAY for `--format json`, not one object
+        # per line, and its field shapes are its own: Names is a list, and
+        # it carries ImageID beside Image. Reading it as if it were Docker
+        # returns nothing at all — and nothing at all looks exactly like
+        # "no container holds this", which is the answer that loses data.
+        ok, text = _run(source.provider,
+                        _argv(source, ["ps", "-a", "--format", "json"]))
+        source.usage_known = ok
+        return json_value(text, []) or [] if ok else []
     if source.engine_id in ("incus", "lxd"):
+        # Incus answers "used by" itself, per object, so the instance list
+        # is not what decides it here.
         ok, text = _run(source.provider,
                         _argv(source, ["list", "--format", "json"]))
         return json_value(text, []) or [] if ok else []
@@ -138,10 +161,20 @@ def image_users(containers: list, repo_tag: str, image_id: str) -> list:
     held = []
     for item in containers:
         used = str(item.get("Image") or item.get("image") or "")
+        # Podman names the id separately; Docker folds it into Image when
+        # the image has no tag.
+        used_id = str(item.get("ImageID") or item.get("ImageId") or "")
         bare = used.replace("sha256:", "")
-        if repo_tag and used == repo_tag:
+        tail = used.rsplit("/", 1)[-1]          # docker.io/library/nginx:1.27
+        if repo_tag and repo_tag not in (":", "<none>:<none>") \
+                and used in (repo_tag, f"docker.io/library/{repo_tag}",
+                             f"docker.io/{repo_tag}"):
             held.append(_container_name(item))
-        elif short and bare.startswith(short):
+        elif repo_tag and tail == repo_tag.rsplit("/", 1)[-1] \
+                and repo_tag.count("/") == 0 and used.endswith(repo_tag):
+            held.append(_container_name(item))
+        elif short and (bare.startswith(short)
+                        or used_id.replace("sha256:", "").startswith(short)):
             held.append(_container_name(item))
     return [name for name in held if name]
 
@@ -158,8 +191,10 @@ def volume_users(containers: list, volume: str) -> list:
     for item in containers:
         mounts = item.get("Mounts") or item.get("mounts") or ""
         if isinstance(mounts, list):
-            parts = [str(m.get("Name") or m.get("Source") or m)
-                     for m in mounts]
+            # Three shapes in the wild: podman's list of plain strings,
+            # the API's list of objects, and Docker's comma-joined text.
+            parts = [str(m.get("Name") or m.get("Source") or "")
+                     if isinstance(m, dict) else str(m) for m in mounts]
         else:
             parts = [p.strip() for p in str(mounts).split(",")]
         if volume and volume in parts:
@@ -206,6 +241,8 @@ def disk_usage(source) -> dict:
 def images_on(source) -> tuple:
     """(rows, error) for one source. Rows are page-ready dicts."""
     provider = source.provider
+    if source.engine_id == "podman":
+        return _podman_images(source)
     if source.engine_id in DOCKER_LIKE:
         argv = _argv(source, ["images", "--format", "{{json .}}"])
         ok, text = _run(provider, argv)
@@ -260,6 +297,65 @@ def images_on(source) -> tuple:
     return [], f"{source.engine}: no image listing yet"
 
 
+def _podman_images(source) -> tuple:
+    """Podman's image list is a JSON array with RepoTags, Id and byte sizes.
+
+    Read as Docker's one-object-per-line output it yields nothing, and an
+    empty Images page on a machine full of images looks like a working
+    page with an empty engine.
+    """
+    argv = _argv(source, ["images", "--format", "json"])
+    ok, text = _run(source.provider, argv)
+    if not ok:
+        return [], text
+    rows = []
+    for item in json_value(text, []) or []:
+        tags = [str(x) for x in (item.get("RepoTags")
+                                 or item.get("Names") or [])]
+        tags = [x for x in tags if x and not x.endswith("<none>")]
+        image_id = str(item.get("Id") or "")[:12]
+        reference = tags[0] if tags else image_id
+        repo, _, tag = reference.rpartition(":")
+        if not repo:                       # an untagged image: only an id
+            repo, tag = "", ""
+        rows.append({
+            "repository": repo, "tag": tag, "id": image_id,
+            "reference": reference,
+            "created": str(item.get("CreatedAt") or "")[:10],
+            "size": _human(item.get("Size")),
+            "used_by": image_users(source.containers, reference, image_id),
+            "dangling": not tags,
+            "raw": item,
+        })
+    return rows, ""
+
+
+def _podman_volumes(source) -> tuple:
+    """Podman's volume list carries no size, and inventing one is worse.
+
+    `podman system df` reports totals per kind, not per volume, so the
+    Size column stays empty here rather than showing a number that is not
+    this volume's.
+    """
+    argv = _argv(source, ["volume", "ls", "--format", "json"])
+    ok, text = _run(source.provider, argv)
+    if not ok:
+        return [], text
+    rows = []
+    for item in json_value(text, []) or []:
+        name = str(item.get("Name") or "")
+        rows.append({
+            "name": name,
+            "driver": str(item.get("Driver") or ""),
+            "mountpoint": str(item.get("Mountpoint") or ""),
+            "size": "",
+            "used_by": volume_users(source.containers, name),
+            "pool": "",
+            "raw": item,
+        })
+    return rows, ""
+
+
 def _human(size) -> str:
     try:
         value = float(size)
@@ -275,6 +371,8 @@ def _human(size) -> str:
 # --- volumes ---------------------------------------------------------------------
 def volumes_on(source) -> tuple:
     provider = source.provider
+    if source.engine_id == "podman":
+        return _podman_volumes(source)
     if source.engine_id in DOCKER_LIKE:
         argv = _argv(source, ["volume", "ls", "--format", "{{json .}}"])
         ok, text = _run(provider, argv)
@@ -338,34 +436,72 @@ def _incus_volumes(source) -> tuple:
 
 
 # --- gathering across every source ------------------------------------------------
-def _gather(reader, engine_ids, log_error=None) -> list:
-    rows = []
+@dataclass
+class Stock:
+    """What a sweep found: the rows, and every place that was asked.
+
+    ⚠️ The sources are listed separately ON PURPOSE. Counting them from the
+    rows — which is what the unified container table does — makes an engine
+    that answered perfectly and holds nothing disappear: the page then says
+    "0 from 0 sources", which reads as "nothing answered" when the truth is
+    "nothing stored". An empty Docker is not an absent Docker, and the
+    difference is the whole reason someone opens this page.
+    """
+
+    rows: list = field(default_factory=list)
+    sources: list = field(default_factory=list)   # (engine_id, engine,
+                                                  #  target, kind, active)
+    problems: list = field(default_factory=list)  # (where, first line)
+
+    def __iter__(self):
+        """So `for row in stock` and `list(stock)` still read naturally."""
+        return iter(self.rows)
+
+    def __len__(self):
+        return len(self.rows)
+
+
+def _gather(reader, engine_ids, log_error=None) -> Stock:
+    stock = Stock()
     for source in sources(engine_ids):
         source.containers = containers_on(source)
         found, error = reader(source)
-        if error and log_error:
-            log_error(f"{source.engine} / {source.name}: "
-                      f"{error.splitlines()[0]}")
+        stock.sources.append((source.engine_id, source.engine, source.name,
+                              source.kind, source.active))
+        if error:
+            stock.problems.append((f"{source.engine} / {source.name}",
+                                   error.splitlines()[0]))
+            if log_error:
+                log_error(f"{source.engine} / {source.name}: "
+                          f"{error.splitlines()[0]}")
         for row in found:
             row.update({
                 "engine": source.engine, "engine_id": source.engine_id,
                 "target": source.name, "address": source.address,
                 "kind": source.kind, "active": source.active,
+                "usage_known": source.usage_known,
             })
-            rows.append(row)
-    return rows
+            stock.rows.append(row)
+    return stock
 
 
-def list_images(engine_ids=ENGINES, log_error=None) -> list:
+def list_images(engine_ids=ENGINES, log_error=None) -> Stock:
     return _gather(images_on, engine_ids, log_error)
 
 
-def list_volumes(engine_ids=ENGINES, log_error=None) -> list:
+def list_volumes(engine_ids=ENGINES, log_error=None) -> Stock:
     return _gather(volumes_on, engine_ids, log_error)
 
 
 # --- actions on one image ---------------------------------------------------------
-def _held_note(users: list, noun: str) -> str:
+def _held_note(users: list, noun: str, known: bool = True) -> str:
+    if not users and not known:
+        # ⚠️ The most dangerous sentence this module could print is
+        # "nothing is holding this" when the container listing failed.
+        return (f"\u26a0 kontainy could not read the container list on this "
+                f"source, so it does NOT know whether anything is using "
+                f"this {noun}. Treat the empty Used by column as unknown, "
+                f"not as free, and check before removing it.")
     if not users:
         return (f"Nothing is holding this {noun}, so removing it frees the "
                 f"space and breaks nothing.")
@@ -387,7 +523,8 @@ def image_actions(provider, target, row: dict) -> list:
                    "Fingerprint, aliases, properties and what is using it."),
             action(f"image-rm-{reference}", "\U0001f5d1  Remove",
                    base + ["image", "delete", reference],
-                   _held_note(row.get("used_by") or [], "image"),
+                   _held_note(row.get("used_by") or [], "image",
+                              row.get("usage_known", True)),
                    destructive=True),
         ]
     return [
@@ -413,7 +550,8 @@ def image_actions(provider, target, row: dict) -> list:
                "login the push is refused — `docker login` first."),
         action(f"image-rm-{reference}", "\U0001f5d1  Remove",
                base + ["rmi", reference],
-               _held_note(row.get("used_by") or [], "image"),
+               _held_note(row.get("used_by") or [], "image",
+                          row.get("usage_known", True)),
                destructive=True),
     ]
 
@@ -463,6 +601,8 @@ def prune_images_action(provider, target, rows: list) -> Action:
     anyone trusts it. Here the rows are already known, so this is an
     ordinary `rmi` of things the user can read first.
     """
+    if any(not r.get("usage_known", True) for r in rows):
+        return None                 # see prune_volumes_action
     unused = [r for r in rows if not r.get("used_by")]
     if not unused:
         return None
@@ -494,7 +634,8 @@ def volume_actions(provider, target, row: dict) -> list:
                    "The volume's configuration and everything using it."),
             action(f"volume-rm-{name}", "\U0001f5d1  Remove",
                    base + ["storage", "volume", "delete", pool, name],
-                   _held_note(row.get("used_by") or [], "volume"),
+                   _held_note(row.get("used_by") or [], "volume",
+                              row.get("usage_known", True)),
                    destructive=True),
         ]
     return [
@@ -512,7 +653,8 @@ def volume_actions(provider, target, row: dict) -> list:
                "without root and without guessing its path."),
         action(f"volume-rm-{name}", "\U0001f5d1  Remove",
                base + ["volume", "rm", name],
-               _held_note(row.get("used_by") or [], "volume"),
+               _held_note(row.get("used_by") or [], "volume",
+                          row.get("usage_known", True)),
                destructive=True),
     ]
 
@@ -580,7 +722,15 @@ def restore_action(provider, target, row: dict, path: str) -> Action:
 
 
 def prune_volumes_action(provider, target, rows: list) -> Action:
-    """The one that matters most. Named, every time."""
+    """The one that matters most. Named, every time.
+
+    ⚠️ And refused outright when the container listing failed. "Remove
+    everything unused" computed from a usage column that could not be
+    filled in is a command to delete everything, and it would run without
+    a single thing on screen looking wrong.
+    """
+    if any(not r.get("usage_known", True) for r in rows):
+        return None
     unused = [r for r in rows if not r.get("used_by")]
     if not unused:
         return None
@@ -606,7 +756,7 @@ def prune_volumes_action(provider, target, rows: list) -> Action:
         destructive=True)
 
 
-__all__ = ["ENGINES", "Source", "sources", "containers_on", "disk_usage",
+__all__ = ["ENGINES", "Source", "Stock", "sources", "containers_on", "disk_usage",
            "images_on", "volumes_on", "list_images", "list_volumes",
            "image_users", "volume_users", "image_actions", "volume_actions",
            "tag_action", "save_action", "pull_action", "create_volume_action",
