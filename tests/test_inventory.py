@@ -350,10 +350,26 @@ def test_a_source_that_fails_does_not_stop_the_others(monkeypatch):
     good, bad = docker(), FakeProvider(id="podman", binary="podman")
     monkeypatch.setattr(inventory, "sources", lambda engine_ids=None: [
         source(good), source(bad)])
-    problems = []
-    rows = inventory.list_images(log_error=problems.append)
-    assert [r["repository"] for r in rows if r["repository"] == "nginx"]
-    assert problems
+    logged = []
+    stock = inventory.list_images(log_error=logged.append)
+    assert [r["repository"] for r in stock.rows if r["repository"] == "nginx"]
+    assert logged and stock.problems
+    assert len(stock.sources) == 2
+
+
+def test_an_engine_that_holds_nothing_is_still_a_source(monkeypatch):
+    """Counting sources from the rows makes an engine that answered and
+    holds nothing disappear, and the page then says "0 from 0 sources" —
+    which reads as "nothing answered". An empty Docker is not an absent
+    Docker, and telling them apart is why anyone opens this page."""
+    empty = FakeProvider(answers={"ps -a": "", "images": "",
+                                  "volume ls": "", "system df": "{}"})
+    monkeypatch.setattr(inventory, "sources",
+                        lambda engine_ids=None: [source(empty)])
+    stock = inventory.list_images()
+    assert stock.rows == []
+    assert len(stock.sources) == 1
+    assert stock.problems == []
 
 
 def test_every_row_says_where_it_came_from(monkeypatch):
@@ -362,7 +378,7 @@ def test_every_row_says_where_it_came_from(monkeypatch):
     provider = docker()
     monkeypatch.setattr(inventory, "sources",
                         lambda engine_ids=None: [source(provider)])
-    for row in inventory.list_images():
+    for row in inventory.list_images().rows:
         assert row["engine"] and row["target"] and "engine_id" in row
 
 
@@ -379,6 +395,11 @@ def test_both_pages_are_in_the_sidebar_on_every_os(monkeypatch):
         mw = importlib.reload(mw)
         names = [cls.NAME for _, cls in mw.SIDEBAR if cls is not None]
         assert "images" in names and "volumes" in names, os_kind
+    # ⚠️ Undo FIRST, then reload. Reloading while OS_KIND is still patched
+    # leaves main_window built for a machine this is not, for every test
+    # that runs afterwards — and the one that noticed was a palette test
+    # three files away, complaining that Incus had no page.
+    monkeypatch.undo()
     importlib.reload(mw)
 
 
@@ -406,8 +427,131 @@ def test_the_cli_can_list_only_what_nothing_holds(monkeypatch, capsys):
             {"engine": "Docker", "engine_id": "docker", "target": "default",
              "name": "forgotten", "driver": "local", "mountpoint": "/w",
              "size": "900MB", "used_by": []}]
-    monkeypatch.setattr(inventory, "list_volumes",
-                        lambda *a, **k: [dict(r) for r in rows])
+    monkeypatch.setattr(inventory, "list_volumes", lambda *a, **k:
+                        inventory.Stock(rows=[dict(r) for r in rows],
+                                        sources=[("docker", "Docker",
+                                                  "default", "local", True)]))
     assert cli.main(["volumes", "--unused"]) == 0
     printed = capsys.readouterr().out
     assert "forgotten" in printed and "pgdata" not in printed
+
+
+def test_podman_without_a_connection_is_not_given_one():
+    """"(local)" is the name this project gives to "no connection
+    selected", not a podman connection. Passing it produces
+    `read cli flags: connection "(local)" not found`, which is what the
+    Images page did on every machine where podman has no connection
+    configured — most of them."""
+    from kontainy.core.providers.base import Target
+    from kontainy.core.providers.containers import PodmanProvider
+    podman = PodmanProvider()
+    assert inventory.conn(podman, Target("(local)", "this machine", True)) == []
+    assert inventory.conn(podman, Target("prod", "ssh://x")) == \
+        ["--connection", "prod"]
+
+
+def test_the_connection_rule_has_exactly_one_implementation(monkeypatch):
+    """It had two, they disagreed, and the second one shipped broken.
+
+    Proven by moving the real one: if inventory still had a copy, this
+    patch would not reach it."""
+    from kontainy.core.providers import containers
+    monkeypatch.setattr(containers, "connection_args",
+                        lambda provider, target: ["--sentinel"])
+    assert inventory.conn(containers.PodmanProvider(), None) == ["--sentinel"]
+
+
+# --- podman speaks its own JSON, not Docker's ------------------------------------
+PODMAN_PS = json.dumps([
+    {"Id": "aaa", "Names": ["web"], "Image": "docker.io/library/nginx:1.27",
+     "ImageID": "111111111111", "Mounts": ["site"]},
+    {"Id": "bbb", "Names": ["old"], "Image": "sha256:abc123def456",
+     "ImageID": "abc123def456", "Mounts": []},
+])
+PODMAN_IMAGES = json.dumps([
+    {"Id": "111111111111aaaa", "RepoTags": ["docker.io/library/nginx:1.27"],
+     "Size": 74000000, "CreatedAt": "2026-10-01T10:00:00Z"},
+    {"Id": "abc123def456aaaa", "RepoTags": [], "Size": 120000000,
+     "CreatedAt": "2026-10-20T10:00:00Z"},
+])
+PODMAN_VOLUMES = json.dumps([
+    {"Name": "site", "Driver": "local", "Mountpoint": "/home/u/.local/x"},
+    {"Name": "spare", "Driver": "local", "Mountpoint": "/home/u/.local/y"},
+])
+
+
+def podman(**extra):
+    answers = {"ps -a": PODMAN_PS, "images": PODMAN_IMAGES,
+               "volume ls": PODMAN_VOLUMES}
+    answers.update(extra)
+    return FakeProvider(id="podman", binary="podman", answers=answers)
+
+
+def test_podman_images_are_read_as_an_array_not_line_by_line():
+    """Docker prints one JSON object per line; podman prints an array. Read
+    the wrong way it yields nothing, and an empty Images page on a machine
+    full of images looks like a working page with an empty engine."""
+    rows, error = inventory.images_on(source(podman()))
+    assert not error and len(rows) == 2
+    nginx = next(r for r in rows if r["tag"] == "1.27")
+    assert nginx["repository"] == "docker.io/library/nginx"
+    assert nginx["size"].endswith("MB")
+
+
+def test_podman_matches_a_container_by_its_separate_image_id():
+    rows, _ = inventory.images_on(source(podman()))
+    assert next(r for r in rows if r["tag"] == "1.27")["used_by"] == ["web"]
+    assert next(r for r in rows if r["dangling"])["used_by"] == ["old"]
+
+
+def test_podman_volumes_have_no_size_rather_than_a_wrong_one():
+    """podman system df reports totals per kind, not per volume."""
+    rows, error = inventory.volumes_on(source(podman()))
+    assert not error
+    assert {r["name"]: r["size"] for r in rows} == {"site": "", "spare": ""}
+    assert {r["name"]: r["used_by"] for r in rows}["site"] == ["web"]
+
+
+def test_podman_is_never_asked_with_a_docker_template():
+    provider = podman()
+    src = source(provider)
+    inventory.images_on(src)
+    inventory.volumes_on(src)
+    assert not any("{{json .}}" in " ".join(c) for c in provider.calls)
+
+
+# --- the difference between "free" and "we could not tell" -----------------------
+def test_a_failed_container_listing_is_not_reported_as_free():
+    """⚠️ The most dangerous sentence this module could print is "nothing is
+    holding this" when the listing it would have learned that from failed."""
+    provider = docker()
+    provider.answers.pop("ps -a")
+    src = source(provider)
+    assert src.usage_known is False
+    rows, _ = inventory.volumes_on(src)
+    remove = next(a for a in inventory.volume_actions(
+        provider, provider.targets()[0],
+        dict(rows[0], usage_known=False)) if "Remove" in a.label)
+    assert "does NOT know" in remove.explanation
+    assert "Nothing is holding" not in remove.explanation
+
+
+def test_prune_is_refused_outright_when_usage_is_unknown():
+    """"Remove everything unused" computed from a column that could not be
+    filled in is a command to delete everything."""
+    provider = docker()
+    rows, _ = inventory.volumes_on(source(provider))
+    blind = [dict(r, used_by=[], usage_known=False) for r in rows]
+    assert inventory.prune_volumes_action(
+        provider, provider.targets()[0], blind) is None
+    assert inventory.prune_images_action(
+        provider, provider.targets()[0], blind) is None
+
+
+def test_usage_known_travels_with_every_row(monkeypatch):
+    provider = docker()
+    provider.answers.pop("ps -a")
+    monkeypatch.setattr(inventory, "sources",
+                        lambda engine_ids=None: [source(provider)])
+    stock = inventory.list_volumes()
+    assert stock.rows and all(r["usage_known"] is False for r in stock.rows)

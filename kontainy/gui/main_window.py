@@ -353,6 +353,71 @@ class MainWindow(WindowMenuMixin, QMainWindow):
                 self._switch_page(i)
                 return
 
+    # --- Ctrl+K ------------------------------------------------------------
+    def _menu_actions(self) -> list:
+        """Every menu item, harvested from the menu bar itself.
+
+        Walked rather than listed by hand, for the same reason the README
+        test asks the parser: a hand-written list is correct on the day it
+        is written and wrong on the day after the next menu item lands.
+        """
+        found = []
+        for menu_action in self.menuBar().actions():
+            menu = menu_action.menu()
+            if menu is None:
+                continue
+            where = menu_action.text().replace("&", "")
+            for action in menu.actions():
+                label = action.text().replace("&", "").strip()
+                if not label or action.isSeparator() or action.menu():
+                    continue
+                shortcut = action.shortcut().toString()
+                found.append((label,
+                              f"{where}{'   ' + shortcut if shortcut else ''}",
+                              action.trigger))
+        return found
+
+    def _palette_index(self) -> list:
+        """The searchable index.
+
+        The catalogue and the Learn topics never change while kontainy
+        runs, so they are built once; pages, menu items and the objects the
+        pages are holding are rebuilt every time, because those do change.
+        """
+        from ..core import palette
+        if not hasattr(self, "_palette_static"):
+            self._palette_static = (palette.setting_entries()
+                                    + palette.topic_entries())
+        return (palette.page_entries(self.pages)
+                + palette.action_entries(self._menu_actions())
+                + palette.object_entries(self.pages)
+                + self._palette_static)
+
+    def open_palette(self) -> None:
+        from .dialogs.command_palette import CommandPalette
+        dialog = CommandPalette(self._palette_index(), self)
+        dialog.chosen.connect(self._palette_chose)
+        dialog.exec()
+
+    def _palette_chose(self, entry) -> None:
+        payload = entry.payload
+        if "call" in payload:
+            payload["call"]()
+            return
+        if "setting" in payload:
+            self._open_setting(payload["setting"])
+            return
+        if "topic" in payload:
+            index, position = payload["topic"]
+            self.go("learn")
+            self.pages["learn"].focus_topic(index, position)
+            return
+        if "page" in payload:
+            self.go(payload["page"])
+            page = self.pages.get(payload["page"])
+            if payload.get("select") and hasattr(page, "select_named"):
+                page.select_named(payload["select"])
+
     def _host_label(self) -> str:
         from ..core import hosts
         name = (self.config.get("active_host") or "").strip()

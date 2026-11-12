@@ -155,6 +155,33 @@ class Page(QWidget):
     def add_tool_stretch(self) -> None:
         self.toolbar.addStretch()
 
+    def select_named(self, label: str) -> None:
+        """Land on one row of this page's table, by its name.
+
+        Written once here rather than on each table page: the pages that
+        have a table all keep `search`, `filtered` and `table`, and a page
+        without them should ignore this rather than raise. Ctrl+K takes you
+        to a container by name, and arriving on the right page with the
+        wrong row selected would make the jump pointless.
+
+        The filter box is set to the name too, so the row is not merely
+        selected but visible — on a machine with ninety containers the
+        selection can otherwise sit three screens below the fold.
+        """
+        table = getattr(self, "table", None)
+        if table is None or not hasattr(self, "filtered"):
+            return
+        box = getattr(self, "search", None)
+        if box is not None and hasattr(box, "setText"):
+            box.setText(label)
+        for row, item in enumerate(getattr(self, "filtered", [])):
+            if not isinstance(item, dict):
+                continue
+            if label in [str(value) for value in item.values()]:
+                table.selectRow(row)
+                table.setFocus()
+                return
+
     def show_command(self, command: str, **kw) -> None:
         self.command_strip.show_command(command, **kw)
 

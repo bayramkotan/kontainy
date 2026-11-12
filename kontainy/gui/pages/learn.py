@@ -530,6 +530,24 @@ class LearnPage(Page):
         self._panels[index] = panel
         self._built[index] = True
 
+    def focus_topic(self, index: int, position: int) -> None:
+        """Open one topic by its place in the catalogue.
+
+        What Ctrl+K lands on. The search box finds the FIRST match for a
+        word; the palette already knows which of the 204 it means, so it
+        says so rather than making the page guess again.
+        """
+        if not 0 <= index < len(LEARN_CATEGORIES):
+            return
+        self._switch_cat(index)
+        panel = self._panels.get(index)
+        if panel and 0 <= position < len(panel.cards):
+            card = panel.cards[position]
+            card.expand()
+            self.status.emit(
+                f"{LEARN_CATEGORIES[index]['title']}: "
+                f"{LEARN_CATEGORIES[index]['topics'][position]['title']}")
+
     def _switch_cat(self, index: int) -> None:
         self._build_category(index)
         self._stack.setCurrentIndex(index)

@@ -216,6 +216,20 @@ Or download the standalone binary — **no Python required:**
 
 ## ✨ Features
 
+### 🔍 Go to anything — `Ctrl+K`
+
+kontainy holds 19 pages, 152 settings and 204 Learn topics. One box reaches
+all of them: type a few letters, press Enter, be there.
+
+- Letters are matched **in order, not as a block** — `snm` finds
+  *Short name mode*, `dap` finds *Drop capability*
+- Knows the words people actually type: `k8s` finds Kubernetes, `qemu`
+  finds KVM / libvirt, `daemon.json` finds the catalogue
+- Narrow by kind with a prefix — `>` action, `#` setting, `?` topic,
+  `@` container or volume, `/` page
+- Containers, images and volumes are folded in from what the pages already
+  loaded, so **opening it never runs a command**
+
 <table>
 <tr>
 <td width="50%" valign="top">

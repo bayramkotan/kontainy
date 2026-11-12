@@ -76,6 +76,16 @@ class WindowMenuMixin:
         # ── View ──────────────────────────────────────────────────────────
         view_menu = menubar.addMenu("&View")
 
+        # First item on purpose: it is the one that replaces hunting
+        # through nineteen pages for a setting whose name you already know.
+        palette = QAction("\U0001f50d &Go to Anything\u2026", self)
+        palette.setShortcut("Ctrl+K")
+        palette.setStatusTip("Jump to any page, setting, container or "
+                             "Learn topic by typing a few letters")
+        palette.triggered.connect(self.open_palette)
+        view_menu.addAction(palette)
+        view_menu.addSeparator()
+
         refresh = QAction("\U0001f504 Refresh Current Page", self)
         refresh.setShortcut("F5")
         refresh.triggered.connect(self._menu_refresh_current)
