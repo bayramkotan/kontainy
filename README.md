@@ -230,6 +230,26 @@ all of them: type a few letters, press Enter, be there.
 - Containers, images and volumes are folded in from what the pages already
   loaded, so **opening it never runs a command**
 
+### 🖱 Tables that answer back
+
+Every table — containers, machines, images, volumes, and each technology's
+own page — takes the same input:
+
+| | |
+|---|---|
+| **Right-click** | Every action the engine offers for that row, destructive ones below a separator, each with its explanation on hover |
+| **Double-click** / **Enter** | The obvious thing: logs for a container, inspect for an image or volume |
+| **Delete** | Remove, through the same confirmation as the button |
+| **Ctrl+C** / **Ctrl+Shift+C** | The row's name, or the whole selection as tab-separated text that pastes into a spreadsheet |
+| **F5** / **Ctrl+F** | Refresh, or jump to the filter box |
+
+The menu is built from the **same actions the toolbar runs**, so it offers
+Stop on a running container and Start on a stopped one without anything
+being listed twice. Select several rows and a verb appears only if it
+applies to **all** of them — asked to stop a running and a stopped
+container, kontainy leaves Stop out rather than running it on the one it
+fits.
+
 <table>
 <tr>
 <td width="50%" valign="top">

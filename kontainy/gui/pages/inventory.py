@@ -35,12 +35,13 @@ from ...core.providers import by_id
 from ...utils.config import log
 from ...utils.workers import CallableJob, run_job
 from .base import Page
+from .tableactions import TableActions
 
 HELD = "#f9e2af"          # something is using it — think before removing
 FREE = "#9399b2"          # nothing holds it
 
 
-class StockPage(Page):
+class StockPage(TableActions, Page):
     """Shared skeleton for the two pages: table, source filter, detail tabs.
 
     Only the columns, the reader and the actions differ, so they live in the
@@ -90,6 +91,7 @@ class StockPage(Page):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.currentCellChanged.connect(self._show_detail)
+        self.wire_table()
         split.addWidget(self.table)
 
         self.detail = QTabWidget()
@@ -305,6 +307,29 @@ class StockPage(Page):
     def actions_for(self, provider, target, item) -> list:
         raise NotImplementedError
 
+    # --- what the right-click menu and the keys use ------------------------
+    def row_label(self, row: dict) -> str:
+        return str(row.get("name") or row.get("reference")
+                   or row.get("id") or "")
+
+    def actions_for_rows(self, rows: list) -> list:
+        """The same actions the toolbar runs, for the row under the cursor.
+
+        Only for a single row: an image or a volume is removed by name and
+        the prune path already exists for "everything unused", which is a
+        far better answer than a menu quietly looping over a selection.
+        """
+        if len(rows) != 1:
+            return []
+        provider, target = self._target_of(rows[0])
+        if provider is None:
+            return []
+        return [provider.prepare(a)
+                for a in self.actions_for(provider, target, rows[0])]
+
+    def run_action(self, action) -> None:
+        self._run(action)
+
     # --- running -----------------------------------------------------------
     def _run(self, action) -> None:
         if action is None:
@@ -365,6 +390,7 @@ class ImagesPage(StockPage):
                 "safe to remove before you remove it.")
     NOUN = "images"
     SINGULAR = "image"
+    DEFAULT_VERB = "inspect"
     FILTER_HINT = "Filter: repository, tag, id…"
     COLUMNS = [("Repository", "repository"), ("Tag", "tag"),
                ("Image ID", "id"), ("Created", "created"), ("Size", "size")]
@@ -523,6 +549,7 @@ class VolumesPage(StockPage):
                 "database being deleted by mistake.")
     NOUN = "volumes"
     SINGULAR = "volume"
+    DEFAULT_VERB = "inspect"
     FILTER_HINT = "Filter: name, driver, mountpoint…"
     COLUMNS = [("Name", "name"), ("Driver", "driver"),
                ("Mountpoint", "mountpoint"), ("Size", "size")]

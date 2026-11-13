@@ -31,6 +31,7 @@ from ...core.providers.base import socket_kind
 from ...utils.config import log
 from ...utils.workers import CallableJob, run_job
 from .base import Page
+from .tableactions import TableActions
 
 STATE_COLORS = {
     "running": "#a6e3a1", "exited": "#9399b2", "created": "#89dceb",
@@ -141,7 +142,7 @@ def _collect_all(engines=ENGINES) -> list:
     return rows
 
 
-class ContainersPage(Page):
+class ContainersPage(TableActions, Page):
     NAME = "containers"
     TITLE = "All containers"
     ICON = "📦"
@@ -212,6 +213,7 @@ class ContainersPage(Page):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.currentCellChanged.connect(self._show_detail)
+        self.wire_table()
         split.addWidget(self.table)
 
         self.detail = QTabWidget()
@@ -431,6 +433,44 @@ class ContainersPage(Page):
         target = next((x for x in provider.targets()
                        if x.name == item["target"]), None)
         return provider, target
+
+    DEFAULT_VERB = "logs"
+    REMOVE_VERB = "remove"
+
+    def row_label(self, row: dict) -> str:
+        return str(row.get("name") or row.get("id") or "")
+
+    def actions_for_rows(self, rows: list) -> list:
+        """The menu, built from the provider — never a second list.
+
+        One row gets the engine's own actions for it. Several get the
+        bulk builder, which returns nothing for a verb that does not fit
+        every row, so the menu simply does not offer it: asking to remove
+        four containers must not quietly remove three.
+        """
+        from ...core.providers.base import actions_for_selection
+        provider, target = self._target_of(rows[0])
+        if provider is None:
+            return []
+        if len(rows) == 1:
+            return [provider.prepare(a) for a in
+                    provider.object_actions(target, rows[0]["raw"])]
+
+        # A selection can span engines and contexts; a single command
+        # cannot. Offer the bulk verbs only while it is one source.
+        sources = {(r["engine_id"], r["target"]) for r in rows}
+        if len(sources) > 1:
+            return []
+        built = []
+        for verb in ("start", "stop", "restart", "remove"):
+            one = actions_for_selection(provider, target,
+                                        [r["raw"] for r in rows], verb)
+            if one is not None:
+                built.append(provider.prepare(one))
+        return built
+
+    def run_action(self, action) -> None:
+        self._run(action)
 
     def _selected_items(self) -> list:
         indexes = sorted({index.row() for index

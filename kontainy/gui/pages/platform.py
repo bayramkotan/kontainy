@@ -39,6 +39,7 @@ from ...core.terminal import describe, open_terminal
 from ...utils.workers import CallableJob, run_job
 from ..widgets import FlowLayout
 from .base import Page
+from .tableactions import TableActions
 
 
 def _clear(layout) -> None:
@@ -199,7 +200,7 @@ class PortsDialog(QDialog):
         return out
 
 
-class PlatformPage(Page):
+class PlatformPage(TableActions, Page):
     """Subclassed per provider by make_platform_page()."""
 
     PROVIDER = None
@@ -402,6 +403,7 @@ class PlatformPage(Page):
         self.objects_table = self._table(["\u2014"])
         self.objects_table.currentCellChanged.connect(self._object_selected)
         self.objects_table.itemSelectionChanged.connect(self._object_selected)
+        self.wire_table(self.objects_table)
         layout.addWidget(self.objects_table, 1)
         self.object_buttons = FlowLayout()
         layout.addLayout(self.object_buttons)
@@ -755,6 +757,52 @@ class PlatformPage(Page):
             button.setObjectName("secondary")
         button.clicked.connect(lambda _=False, a=action: self._run(a))
         layout.addWidget(button)
+
+    # --- right-click, double-click and the keys ----------------------------
+    #: This page's table holds the objects of ONE technology, so its rows
+    #: are always one provider on one target — the mixed-source case the
+    #: unified pages have to guard against cannot arise here.
+    DEFAULT_VERB = ""
+    REMOVE_VERB = "remove"
+
+    def row_label(self, row: dict) -> str:
+        return str(row.get(self.PROVIDER.object_key, "")
+                   or row.get("name") or row.get("id") or "")
+
+    def selected_rows(self) -> list:
+        """The mixin's hook, answered from this page's own listing.
+
+        The unified pages keep `filtered`; this one keeps the provider's
+        Listing in `state`, so the shared mixin is pointed at it rather
+        than taught a second way to find rows.
+        """
+        rows = self._selected_object_rows()
+        if rows:
+            return rows
+        one = self._object_row()
+        return [one] if one is not None else []
+
+    def actions_for_rows(self, rows: list) -> list:
+        from ...core.providers.base import actions_for_selection, verb_of
+        active = (self.state or {}).get("active")
+        if not rows:
+            return []
+        if len(rows) == 1:
+            return [self.PROVIDER.prepare(a) for a in
+                    self.PROVIDER.object_actions(active, rows[0])]
+        verbs, built = [], []
+        for candidate in self.PROVIDER.object_actions(active, rows[0]):
+            verb = verb_of(candidate.label)
+            if verb not in verbs:
+                verbs.append(verb)
+        for verb in verbs:
+            one = actions_for_selection(self.PROVIDER, active, rows, verb)
+            if one is not None:
+                built.append(self.PROVIDER.prepare(one))
+        return built
+
+    def run_action(self, action) -> None:
+        self._run(action)
 
     def _object_row(self):
         listing = (self.state or {}).get("objects")
