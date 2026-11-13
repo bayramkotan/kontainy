@@ -148,7 +148,10 @@ class Page(QWidget):
         btn.setCursor(Qt.PointingHandCursor)
         if width:
             btn.setFixedWidth(width)
-        btn.clicked.connect(slot)
+        # A checkable button answers `toggled`, not `clicked`, so it is
+        # allowed to be made here without one and wired by the caller.
+        if slot is not None:
+            btn.clicked.connect(slot)
         self.toolbar.addWidget(btn)
         return btn
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QHeaderView, QLabel, QLineEdit, QSplitter,
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...core import discovery
+from ...core import discovery, stats
 from ...core.providers import by_id
 from ...core.providers.base import socket_kind
 from ...utils.config import log
@@ -156,11 +156,21 @@ class ContainersPage(TableActions, Page):
     SECOND_COLUMN = "Image"
     CAN_CREATE = True
     SHOW_PORTS = True
+    #: Hypervisors have no `stats`, so the machines page turns this off
+    #: rather than showing two columns that can only ever hold dashes.
+    SHOW_STATS = True
 
     def build(self) -> None:
         self.endpoints = []
         self.rows = []
         self.filtered = []
+        self.snapshot = {}
+        self._stats_busy = False
+        self._timer = QTimer(self)
+        # Five seconds, not one. A snapshot is a real command per context,
+        # and a number that moves faster than you can read it is decoration.
+        self._timer.setInterval(5000)
+        self._timer.timeout.connect(self._tick)
 
         if self.CAN_CREATE:
             self.add_tool_button("\u2795  New", self._new_container,
@@ -169,6 +179,14 @@ class ContainersPage(TableActions, Page):
                                  self._from_template)
         self.refresh_btn = self.add_tool_button(
             "\U0001f504  Refresh", self.refresh)
+        if self.SHOW_STATS:
+            self.live_btn = self.add_tool_button("\u23f8  Live", None)
+            self.live_btn.setCheckable(True)
+            self.live_btn.setToolTip(
+                "Read CPU and memory from every engine every five seconds. "
+                "Each tick is one command per context, so it stops by "
+                "itself whenever this page is not on screen.")
+            self.live_btn.toggled.connect(self._toggle_live)
         self.add_tool_button("\u25b6  Start", lambda: self._act("start"))
         self.add_tool_button("\u25a0  Stop", lambda: self._act("stop"))
         self.add_tool_button("\u21bb  Restart", lambda: self._act("restart"))
@@ -200,10 +218,13 @@ class ContainersPage(TableActions, Page):
 
         split = QSplitter(Qt.Vertical)
 
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(
-            ["Engine", "Context / Connection", "Name", self.SECOND_COLUMN,
-             "State", "Status", "Socket"])
+        headers = ["Engine", "Context / Connection", "Name",
+                   self.SECOND_COLUMN, "State", "Status"]
+        if self.SHOW_STATS:
+            headers += ["CPU", "Memory"]
+        headers.append("Socket")
+        self.table = QTableWidget(0, len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -310,12 +331,19 @@ class ContainersPage(TableActions, Page):
             self.table.insertRow(r)
             target = row["target"] + (" \u25cf" if row["active"] else "")
             cells = [row["engine"], target, row["name"], row["image"],
-                     row["state"], row["status"], row["kind"]]
+                     row["state"], row["status"]]
+            entry = {}
+            if self.SHOW_STATS:
+                entry = stats.for_row(self.snapshot, row)
+                cells += [stats.cpu_text(entry), stats.memory_text(entry)]
+            cells.append(row["kind"])
             for col, text_ in enumerate(cells):
                 item = QTableWidgetItem(str(text_))
                 if col == 4:
                     item.setForeground(QColor(STATE_COLORS.get(text_, "#9399b2")))
                 self.table.setItem(r, col, item)
+            if entry:
+                self._colour_stats(r, entry)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
 
@@ -327,6 +355,102 @@ class ContainersPage(TableActions, Page):
             f"source{'s' if sources != 1 else ''}")
         if self.filtered:
             self.table.selectRow(0)
+
+    # --- live figures ------------------------------------------------------
+    def _colour_stats(self, row: int, entry: dict) -> None:
+        """Amber on a busy container, red on one near its memory limit.
+
+        The memory one is the only number in this table that predicts an
+        outage rather than describing the past: a container at 90% of its
+        own limit is about to be killed by the kernel, and the figure is
+        worth nothing if it looks like all the others.
+        """
+        cpu = entry.get("cpu", float("nan"))
+        if cpu == cpu and cpu >= stats.BUSY_CPU:
+            item = self.table.item(row, 6)
+            if item:
+                item.setForeground(QColor("#f9e2af"))
+        percent = entry.get("mem_percent", float("nan"))
+        if percent == percent and percent >= stats.TIGHT_MEMORY:
+            item = self.table.item(row, 7)
+            if item:
+                item.setForeground(QColor("#f38ba8"))
+
+    def _stats_sources(self) -> list:
+        """(provider, target, engine_id, has_running) for each source.
+
+        ⚠️ A snapshot costs a real command, so a context whose containers
+        are all stopped is skipped: there is nothing to measure there and
+        waiting a second for a table of dashes is worse than no column.
+        """
+        seen = {}
+        for row in self.rows:
+            key = (row["engine_id"], row["target"])
+            running = row["state"] == "running"
+            if key in seen:
+                seen[key] = seen[key] or running
+            else:
+                seen[key] = running
+        found = []
+        for (engine_id, target_name), has_running in seen.items():
+            provider = by_id(engine_id)
+            if provider is None:
+                continue
+            target = next((x for x in provider.targets()
+                           if x.name == target_name), None)
+            found.append((provider, target, engine_id, has_running))
+        return found
+
+    def _read_stats(self) -> dict:
+        return stats.collect(self._stats_sources(), log_error=log().debug)
+
+    def _tick(self) -> None:
+        """One snapshot, off the UI thread, and never two at once.
+
+        Without the in-flight guard a slow engine would have the timer
+        stacking requests behind it until the machine gave up — which is
+        exactly the failure people blame on the app rather than the socket.
+        """
+        if self._stats_busy or not self.live_btn.isChecked():
+            return
+        if not self.isVisible() or not self.rows:
+            return
+        self._stats_busy = True
+
+        def done(snapshot) -> None:
+            self._stats_busy = False
+            self.snapshot = snapshot
+            self._apply_filter()
+
+        def failed(_message) -> None:
+            self._stats_busy = False
+
+        run_job(CallableJob(self._read_stats), done, failed)
+
+    def _toggle_live(self, on: bool) -> None:
+        self.live_btn.setText("⏺  Live" if on else "⏸  Live")
+        if on:
+            self._timer.start()
+            self._tick()
+        else:
+            self._timer.stop()
+            self.snapshot = {}
+            self._apply_filter()
+
+    def hideEvent(self, event) -> None:
+        """Nothing runs while the page is not on screen.
+
+        A timer that keeps shelling out to every engine behind a page
+        nobody is looking at is how a desktop tool earns a reputation for
+        making the fans spin.
+        """
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self.SHOW_STATS and self.live_btn.isChecked():
+            self._timer.start()
 
     def _current(self):
         r = self.table.currentRow()
@@ -602,6 +726,7 @@ class MachinesPage(ContainersPage):
                 "with the host of each one named.")
 
     ENGINES = MACHINE_ENGINES
+    SHOW_STATS = False
     NOUN = "machines"
     SECOND_COLUMN = "Guest OS"
     CAN_CREATE = False          # ky kvm create does this; the wizard is next

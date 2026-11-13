@@ -230,6 +230,22 @@ all of them: type a few letters, press Enter, be there.
 - Containers, images and volumes are folded in from what the pages already
   loaded, so **opening it never runs a command**
 
+### 📈 What it is costing, live
+
+The container table carries **CPU** and **Memory** columns behind a **Live**
+toggle. A container past 50% of a core goes amber; one past 90% of its own
+memory limit goes red, because that is the only figure in the table that
+predicts an outage rather than describing one.
+
+- The memory limit is kept beside the figure — `1.8GB / 1.9GB` — since
+  without the denominator there is no way to see a kill coming
+- **A machine that cannot measure shows a dash, never a zero.** Rootless
+  Podman without cgroup v2 delegation reports no memory at all, and `0 B`
+  there would read as "uses no memory"
+- One snapshot per tick, five seconds apart, taken off the UI thread, never
+  two at once, **and nothing at all while the page is off screen**
+- Contexts whose containers are all stopped are not asked
+
 ### 🖱 Tables that answer back
 
 Every table — containers, machines, images, volumes, and each technology's
